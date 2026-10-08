@@ -1,0 +1,6 @@
+# Register the MiniMax Code provider without changing the profile's default
+# model. The plugin reuses the MiniMax Code desktop app's existing sign-in; no
+# separate login flow is started.
+- insert:
+    - id: llm-minimaxcode
+      name: dsh-connect-minimaxcode
