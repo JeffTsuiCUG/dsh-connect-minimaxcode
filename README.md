@@ -3,7 +3,7 @@
 把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![version](https://img.shields.io/badge/version-0.2.1-cornflowerblue.svg)
+![version](https://img.shields.io/badge/version-0.2.2-cornflowerblue.svg)
 
 ## 灵感来源
 
