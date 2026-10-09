@@ -3,7 +3,7 @@
 把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![version](https://img.shields.io/badge/version-0.2.0-cornflowerblue.svg)
+![version](https://img.shields.io/badge/version-0.2.1-cornflowerblue.svg)
 
 ## 灵感来源
 
@@ -51,7 +51,7 @@
 **方式一：从 Git 仓库安装**（推荐，拿到最新代码）
 
 ```bash
-dsh plugin --profile desktop add https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode.git
+dsh plugin --profile desktop add github:JeffTsuiCUG/dsh-connect-minimaxcode
 ```
 
 **方式二：npm 安装**（发布后可用）
@@ -65,6 +65,19 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
 安装后**无需重启**，插件会热加载；模型随后出现在模型选择器的 **MiniMax Code** 分组中。
+
+### 若安装被 `allowBuilds` 拦截
+
+本仓库把构建产物 `lib/` 一并提交，因此正常情况下安装不会触发构建。若你看到：
+
+```text
+[ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED] Failed to prepare git-hosted package
+```
+
+说明你使用的是**某个早于 `0.2.1` 的提交**（那些版本尚未提交 `lib/`）。解决办法二选一：
+
+- 改用上面写法指定版本：`github:JeffTsuiCUG/dsh-connect-minimaxcode#v0.2.1`
+- 或在该 profile 的 `pnpm-workspace.yaml` 中加入 pnpm 提示的 `allowBuilds` 条目后重试
 
 ## 使用流程
 
@@ -171,6 +184,12 @@ pnpm build       # 构建
 ```
 
 构建依赖 `@earendil-works/pi-ai`，需与宿主中 `dsh-llm-pi-ai` 解析出的版本一致（当前为 `0.85.x`），否则类型不兼容。
+
+**`lib/` 是纳入版本管理的构建产物**，不是生成物。这是刻意为之：git 源安装拿到的是仓库原样内容，若不含 `lib/`，pnpm 会判定该包"需要构建"并触发 `prepare`，随即被构建脚本白名单拦下。改动源码后请重新构建并提交：
+
+```bash
+pnpm build && git add lib
+```
 
 ## 致谢
 

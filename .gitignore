@@ -1,6 +1,10 @@
 node_modules/
 dist/
-lib/
+# lib/ is intentionally NOT ignored. Installing from a git source takes the
+# repository as-is, so the built output has to be committed; otherwise pnpm
+# decides the package "needs to build", runs the prepare step, and refuses:
+#   ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED
+# Build it with `pnpm build` and commit the result.
 *.tsbuildinfo
 .DS_Store
 *.log
