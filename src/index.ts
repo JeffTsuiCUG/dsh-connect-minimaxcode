@@ -10,6 +10,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls in the `webServer` Context augmentation this file relies on.
+import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import {
   expiresInMs,
   expiryLevel,
@@ -109,7 +111,10 @@ function apply(ctx: Context) {
     resolveApiKey: async () => (await readNow())?.token,
   })
 
-  const releaseAdapter = ctx.llm.registerAdapter(['minimaxcode'], adapter)
+  // No disposer is kept: `registerAdapter` releases its routes with the fiber
+  // (LlmRuntime.registerAdapter: "Disposed with the fiber"). Calling the handle
+  // here would run an async disposer that unload never awaits.
+  ctx.llm.registerAdapter(['minimaxcode'], adapter)
 
   /** Build the document the card renders, without ever exposing the token. */
   const buildStatus = async () => {
@@ -144,33 +149,32 @@ function apply(ctx: Context) {
   })()
 
   // Mount the card's status route when the host offers a web server.
-  const mountStatus = async () => {
-    const webserver = (ctx as unknown as { webserver?: { get?: (n: string) => unknown } }).webserver
-    const router = webserver?.get?.('router')
-    if (router === undefined) return
-    try {
-      (router as {
-        get: (path: string, handler: (req: { headers: Record<string, string> }, res: (status: number, body: string) => void) => void) => void
-      }).get(MINIMAX_STATUS_PATH, async (req, res) => {
+  //
+  // The service is `webServer` (a WebServer with `register`), not a `webserver`
+  // with `get('router')`: reading an undeclared service through the Cordis
+  // context proxy throws "cannot get property ... without inject", and an
+  // exception escaping apply() is a fatal load failure for the whole host. The
+  // injection callback waits for the service instead of touching it eagerly.
+  ctx.inject(['webServer'], (webCtx: Context & { webServer: WebServer }) => {
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: MINIMAX_STATUS_PATH,
+      handler: async (req, res) => {
         if (!isLoopback(req.headers.host)) {
-          res(403, JSON.stringify({ error: 'loopback only' }))
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'loopback only' }))
           return
         }
         try {
-          res(200, JSON.stringify(await buildStatus()))
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(await buildStatus()))
         } catch (error) {
-          res(500, JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
         }
-      })
-    } catch {
-      // A host without a matching router simply has no card; the models still work.
-    }
-  }
-  void mountStatus()
-
-  return async () => {
-    releaseAdapter()
-  }
+      },
+    }))
+  })
 }
 
 export { apply }

@@ -94,22 +94,30 @@ export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle
     }),
     getModels: () => buildModels(),
   }
-  const profile = {
+  /**
+   * Build a fresh profile for the catalog and region of this moment.
+   *
+   * `getModels` already reads the live catalog on every call, so the model list
+   * needs no invalidation; what a refresh does invalidate is the per-model
+   * state cached on the profile — configured maxTokens and recorded model
+   * errors, which would otherwise survive a catalog or region change.
+   */
+  const buildProfile = () => ({
     provider: MINIMAXCODE_PROVIDER_ID,
     displayName: 'MiniMax Code',
     streamIdleTimeoutMs: MINIMAX_STREAM_IDLE_TIMEOUT_MS,
     configuredMaxTokens: new Map<string, number>(),
     modelErrors: new Map<string, Error>(),
     piProvider: provider,
-  }
-  let profiles = new Map([[MINIMAXCODE_PROVIDER_ID, profile]])
+  })
+  let profiles = new Map([[MINIMAXCODE_PROVIDER_ID, buildProfile()]])
   return {
     adapter: new PiAiAdapter({
       profiles: () => profiles,
       resolveApiKey: options.resolveApiKey,
     } as never),
     invalidate: () => {
-      profiles = new Map([[MINIMAXCODE_PROVIDER_ID, profile]])
+      profiles = new Map([[MINIMAXCODE_PROVIDER_ID, buildProfile()]])
     },
   }
 }
