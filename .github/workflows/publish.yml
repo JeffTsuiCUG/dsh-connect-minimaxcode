@@ -1,0 +1,66 @@
+name: Publish to npm
+
+# Publishing uses npm Trusted Publishing (OIDC): GitHub proves this workflow's
+# identity to npm with a short-lived credential, so there is no long-lived
+# token in repository secrets to rotate or leak. Provenance is attached
+# automatically, and npm shows the package was built from this repository.
+#
+# Prerequisite, once per package, on npmjs.com:
+#   Package → Settings → Trusted Publisher → GitHub Actions
+#   Organization or user : JeffTsuiCUG
+#   Repository           : dsh-connect-minimaxcode
+#   Workflow filename    : publish.yml
+#   Environment          : (leave empty — this workflow sets no `environment`)
+#
+# The environment field must match exactly. A mismatch, or a package that does
+# not exist yet, both surface as a bare 404 on PUT rather than a useful error.
+# npm has no "pending publisher" feature, so the FIRST version of a package has
+# to be published manually; Trusted Publishing works from the second release on.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for the OIDC exchange with npm
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      # Node 24 ships npm 11.5.1+, which Trusted Publishing requires. Node 22
+      # ships npm 10.x, where the OIDC exchange appears to succeed and the
+      # publish then fails with a 404 that looks like a name conflict.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # typecheck + test + build
+      - run: pnpm run check
+
+      # A tag that disagrees with package.json would either publish the wrong
+      # version or fail as "already published"; catch it before the upload.
+      - name: Verify release tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          echo "tag=$tag package.json=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::release tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - run: npm publish --provenance --access public

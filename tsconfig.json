@@ -4,7 +4,6 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023", "DOM"],
-    "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
@@ -16,6 +15,6 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "lib"]
 }

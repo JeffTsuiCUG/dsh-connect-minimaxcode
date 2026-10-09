@@ -6,6 +6,10 @@
   "author": "JeffTsuiCUG",
   "license": "MIT",
   "private": false,
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode.git"
@@ -57,16 +61,13 @@
     "@deepseek-ai/dsh-llm-pi-ai": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-settings": ">=0.1.7-rc.1 <0.3.0-0",
     "@deepseek-ai/schemastery": ">=3.18.4 <4.0.0",
-    "@earendil-works/pi-ai": ">=0.85.1",
-    "react": "^18.2.0"
+    "@earendil-works/pi-ai": ">=0.85.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
     "@deepseek-ai/schemastery": "3.18.4",
     "@earendil-works/pi-ai": "^0.85.1",
     "@types/node": "^22.20.0",
-    "@types/react": "~18.3.31",
-    "react": "^18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"

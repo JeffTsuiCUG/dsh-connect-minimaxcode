@@ -15,7 +15,8 @@ import { defineConfig } from 'tsdown'
  * That failure is fatal for the whole app, and the component bought nothing, so
  * the client half is not declared or built. It was removed rather than kept
  * around: an export that can never activate is a trap for the next reader, and
- * the cost of losing it is a re-render of a status panel.
+ * the cost of losing it is a re-render of a status panel. React went with it —
+ * the dependency had no remaining consumer.
  */
 export default defineConfig({
   entry: {
@@ -38,7 +39,6 @@ export default defineConfig({
       '@deepseek-ai/dsh-host-webserver',
       '@deepseek-ai/schemastery',
       '@earendil-works/pi-ai',
-      'react',
     ],
   },
 })

@@ -1,3 +1,14 @@
+# pnpm settings.
+#
+# allowBuilds decides which dependencies may run install-time scripts. pnpm
+# writes placeholder entries here when a transitive dependency wants to build;
+# the placeholder text is not valid config, it is a prompt to fill in.
+#
+# Both entries are transitive dependencies of the @deepseek-ai/* peers, not
+# packages this plugin imports. Neither build is needed to consume them:
+# protobufjs ships index.js in its tarball and its postinstall only writes a CLI
+# shim. Denying the build keeps installs reproducible and reproducible across
+# machines, and keeps install-time code from third parties out of the tree.
 allowBuilds:
-  '@google/genai': set this to true or false
-  protobufjs: set this to true or false
+  '@google/genai': false
+  protobufjs: false
