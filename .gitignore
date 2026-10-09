@@ -1,10 +1,19 @@
-﻿node_modules/
+node_modules/
 dist/
 lib/
 *.tsbuildinfo
 .DS_Store
 *.log
-.env
-.env.*
 coverage/
 .vitest/
+
+# Credentials. The plugin reads MiniMax Code's own login state and stores
+# nothing, so any auth file appearing here is a mistake worth failing loudly on.
+.env
+.env.*
+*.auth.json
+.qoder-auth.json
+
+# Scratch: probe scripts written while reverse engineering the gateway, and the
+# tarball npm pack leaves behind.
+*.tgz

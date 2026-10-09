@@ -13,9 +13,9 @@ import { defineConfig } from 'tsdown'
  *   web boot: 1 entry did not activate
  *
  * That failure is fatal for the whole app, and the component bought nothing, so
- * the client half is not declared or built until it is written as a real client
- * plugin (see `dsh.client` in package.json). The card component is kept in the
- * tree, still typechecked, ready to be wired up.
+ * the client half is not declared or built. It was removed rather than kept
+ * around: an export that can never activate is a trap for the next reader, and
+ * the cost of losing it is a re-render of a status panel.
  */
 export default defineConfig({
   entry: {
