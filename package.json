@@ -2,10 +2,18 @@
   "name": "dsh-connect-minimaxcode",
   "displayName": "DSH Connect MiniMax Code",
   "description": "把本机已登录的 MiniMax Code 桌面 App 的模型接入 DeepSeek Harness：复用其登录态，提供 Anthropic Messages 兼容接入与动态模型目录。",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "JeffTsuiCUG",
   "license": "MIT",
   "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode.git"
+  },
+  "homepage": "https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode#readme",
+  "bugs": {
+    "url": "https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues"
+  },
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -17,7 +25,6 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -25,7 +32,6 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
-    "README.en.md",
     "LICENSE"
   ],
   "scripts": {

@@ -1,14 +1,29 @@
 # DSH Connect MiniMax Code (`dsh-connect-minimaxcode`)
 
-把本机已登录的 **MiniMax Code 桌面 App** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
+把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![dsh](https://img.shields.io/badge/DSH-0.2.0%20%7C%200.1.7--0.3.0-0-cordis-8957e5.svg)
+![version](https://img.shields.io/badge/version-0.2.0-cornflowerblue.svg)
+
+## 灵感来源
+
+本插件的思路直接来自 **[dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)**（作者 dingminhua）。
+
+它证明了这样一件事：**桌面 App 已经登录的模型，可以零配置地搬进 DSH**——不去碰账号密码，不引入新的鉴权体系，只是把本机已有的登录态接上一个 provider。本插件把同一套做法用在了 MiniMax Code 上：
+
+| | dsh-connect-workbuddy | 本插件 |
+|---|---|---|
+| 数据来源 | WorkBuddy 桌面 App 的本地登录态 | MiniMax Code 桌面 App 的本地登录态 |
+| 接入方式 | 注册 DSH provider，暴露已登录模型 | 同左 |
+| 目录来源 | 上游实时模型列表 | 同左 |
+
+该项目的架构（插件结构、provider 注册、只读复用登录态）也是本插件的主要参照，致谢见文末。
 
 ---
 
 ## ⚠️ 重要声明（请先阅读）
 
+- **本项目仅供学习与研究使用**，不面向生产环境，也不提供任何商业支持。
 - **本项目为非官方插件**，与 MiniMax、DeepSeek 均无关联，未获其认可或授权。
 - 本插件仅**读取你自己本机上 MiniMax Code 已登录的凭证**，仅驱动**你自己的账号在你自己的电脑上**调用。
 - **禁止**将本插件用于商业用途、超出个人合理使用范围的场景，或任何批量/多账号/规避限额的目的。
@@ -24,44 +39,66 @@
 - **动态模型目录**：从上游接口实时拉取，模型增减无需更新插件
 - **复用官方适配器**：上游为标准 Anthropic Messages 协议，直接复用 DSH 自带 provider，工具调用、推理块、上下文压缩均由 DSH 托管
 - **只读**：插件不写入、不修改 MiniMax 的任何文件，也不执行任何登录或续期动作
+- **不含客户端 UI**：不注册浏览器侧插件，因此不会影响 DSH 的启动（见「已知限制」）
 
 ## 前置条件
 
-1. 已安装并**登录** MiniMax Code 桌面 App
+1. 已安装并**登录 MiniMax Code 桌面 App（国内版）**
 2. DSH 桌面版（内置内核 `0.2.0` 系列）或 Web profile
 
 ## 安装
 
-桌面版（profile 由 Electron 应用独占，需使用 App 自带的载体 CLI）：
-
-```powershell
-& 'D:\dsh\resources\runtime\cli\bin\dsh.cmd' plugin --profile desktop add dsh-connect-minimaxcode
-```
-
-Web profile：
+**方式一：从 Git 仓库安装**（推荐，拿到最新代码）
 
 ```bash
-dsh plugin --profile web add dsh-connect-minimaxcode
+dsh plugin --profile desktop add https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode.git
 ```
+
+**方式二：npm 安装**（发布后可用）
+
+```bash
+dsh plugin --profile desktop add dsh-connect-minimaxcode
+```
+
+Web profile 把 `--profile desktop` 换成 `--profile web`。
+
+> 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
 安装后**无需重启**，插件会热加载；模型随后出现在模型选择器的 **MiniMax Code** 分组中。
 
-## 使用
+## 使用流程
 
-1. 打开 DSH 的模型选择器，选择 `MiniMax Code` 分组下的模型（如 `M2.7`、`M3`）
-2. 正常对话即可，工具调用由 DSH 本地工具执行
+1. **确认桌面 App 已登录**
+   打开 MiniMax Code 桌面 App，确认处于已登录状态。插件读取的是 App 写入的本地登录态。
 
-### 令牌有效期提示
+2. **安装插件**（见上一步的命令），等待热加载完成。
 
-MiniMax Code 的登录令牌为短期 JWT（通常约 15 天）。本插件**不会自动续期**，设置卡片会提示状态：
+3. **选择模型**
+   打开 DSH 的模型选择器，在 **MiniMax Code** 分组下选择模型。可用模型来自上游实时目录，例如 `M2.7`、`M2.7-highspeed`、`M3`、`M3.1-Flash-Preview`。
 
-| 状态 | 含义 | 处理方式 |
-|---|---|---|
-| 🟢 已登录 | 令牌有效 | 正常使用 |
-| 🟡 即将过期（剩余 < 24 小时） | 令牌即将失效 | 打开一次 MiniMax Code 即可刷新 |
-| 🔴 已过期 | 令牌已失效 | 在 MiniMax Code 中重新登录，然后重启 DSH |
+4. **正常对话**
+   直接使用即可。工具调用由 DSH 本地工具执行，插件只负责提供模型通路。
 
-> 令牌过期不会丢失数据，打开 MiniMax Code 桌面 App 重新登录后其会自动写入新的令牌。
+5. **令牌过期时重新登录**
+   MiniMax Code 的登录令牌为短期 JWT（通常约 15 天），本插件**不会自动续期**。过期后：
+
+   | 现象 | 含义 | 处理方式 |
+   |---|---|---|
+   | 正常使用 | 令牌有效 | — |
+   | 剩余不足 24 小时 | 令牌即将失效 | 打开一次 MiniMax Code 桌面 App 刷新 |
+   | 请求返回鉴权错误 | 令牌已失效 | 在 MiniMax Code 中**重新登录**，然后重启 DSH |
+
+   > 令牌过期不会丢失数据。在 MiniMax Code 桌面 App 重新登录后，它会自动写入新的令牌，插件下次启动即可读到。
+
+### 关于响应速度
+
+MiniMax 的这些模型**强制要求先推理再输出**，思考无法关闭。因此：
+
+- 首个字符出现前会有一段等待（实测 M3.1-Flash-Preview 约 3 秒）
+- 推理过程会以 `thinking` 块实时返回，可以在界面中看到模型"在想什么"
+- 这是模型本身的行为，**不是插件造成的延迟**
+
+若更看重流式体感的即时反馈，建议同时保留 DSH 官方模型或其他 provider 作为备选。
 
 ## 工作原理
 
@@ -69,33 +106,50 @@ MiniMax Code 的登录令牌为短期 JWT（通常约 15 天）。本插件**不
 2. 调用 `GET /mavis/api/v1/models` 获取实时模型目录（含上下文长度、多模态、工具调用等能力声明）
 3. 注册 `minimaxcode` provider，指向 `POST /mavis/api/v1/llm/v1/messages`（标准 Anthropic Messages 协议）
 
+### 与网关对接时的三个兼容处理
+
+这些是实测中必须处理的差异，也是本插件与"直接改个 URL 就能用"的主要差异所在：
+
+| # | 现象 | 处理 |
+|---|---|---|
+| 1 | 网关只认 `Authorization: Bearer`，而 pi-ai 默认发 `x-api-key`，后者单独出现会返回 `401 token is required` | 在模型描述符上附带 `Authorization` 头（网关同时接受两个头） |
+| 2 | Anthropic SDK 会自己在 `baseUrl` 后追加 `/v1/messages`；若 `baseUrl` 已以 `/v1` 结尾，请求路径会变成 `/v1/v1/messages`，网关返回 `503 direct_route_not_configured` | `baseUrl` 收到版本段之前，由 SDK 补齐 |
+| 3 | 所有模型强制要求推理，而"关闭推理"会让 pi-ai 发出 `thinking: {type: "disabled"}`，网关返回 `400 ... requires adaptive thinking` | 将"关闭"级别标记为不支持，使该字段被省略（网关接受） |
+
 插件**不**包含任何硬编码的 Token、账号或接口密钥。
 
-## 当前状态与限制
+## 已知限制
 
-- **仅支持国内版（`agent.minimax.cn`）**。国际版的可用性未经验证。
+- **仅支持国内版（`agent.minimax.cn`）**。国际版网关是否可用**未经验证**，请勿据此推断其他区域可用。
+- **必须开启推理**。MiniMax 的全部模型都声明需要推理，关不掉。首字延迟因此高于非推理模型。
+- **未登录时模型列表是内置兜底**。此时选择器中仍会显示 `M2.7`、`M3` 两个内置条目，但它们无法真正调用；登录后才会切换为上游实时目录。判断是否可用，请以实际调用结果为准。
 - **不提供余额/用量显示**。相关接口需要另一套服务端鉴权，非用户 Token 可访问。
-- **不自动续期令牌**，请参照上方「令牌有效期提示」。
+- **不自动续期令牌**，请参照上方「令牌有效期」。
+- **不提供设置界面卡片**。本插件为纯宿主侧插件，不在 DSH 设置页注册任何卡片，因此不会参与浏览器端的启动流程（这同时也是它不会导致 DSH 启动失败的原因）。
+- **上游接口非公开**，MiniMax 客户端更新后可能失效。
 
 ## 卸载
 
-```powershell
-& 'D:\dsh\resources\runtime\cli\bin\dsh.cmd' plugin --profile desktop remove dsh-connect-minimaxcode
+```bash
+dsh plugin --profile desktop remove dsh-connect-minimaxcode
 ```
 
 ## 开发
 
 ```bash
 pnpm install
-pnpm test        # 单元测试
+pnpm test        # 单元测试 + 宿主集成测试
 pnpm typecheck   # 类型检查
 pnpm build       # 构建
 ```
 
+构建依赖 `@earendil-works/pi-ai`，需与宿主中 `dsh-llm-pi-ai` 解析出的版本一致（当前为 `0.85.x`），否则类型不兼容。
+
 ## 致谢
 
-- [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — DSH 插件结构与 provider 注册的参照
-- [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) — 本机登录态复用的设计参照
+- **[dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 本插件的灵感来源，架构与"复用本机登录态接入 DSH"的整体思路均源自该项目
+- [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — 同作者的 DSH 插件，可作为 DSH 插件结构的参照
+- [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) — 客户端 bundle 规范与凭据复用的设计参照
 
 ## 许可证
 
