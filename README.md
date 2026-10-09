@@ -191,11 +191,51 @@ pnpm build       # 构建
 pnpm build && git add lib
 ```
 
+## 同类插件
+
+这些插件与本插件的思路一致——**复用你本机桌面 App 已有的登录态，把模型接进 DSH**，无需另配 API Key。它们由不同作者独立开发，与本项目无隶属关系。
+
+| 插件 | 数据来源 | 每日签到领免费额度 | 额度 / 用量显示 |
+|---|---|---|---|
+| **dsh-connect-trae** | Trae（国内版 + 国际版） | ✅ 国内版 | ✅ Work / 通用积分概览 |
+| **dsh-qoder-connect** | Qoder（国内版 + 国际版，PAT） | ✅ 每日 100 Credits | ✅ 侧栏额度小卡 + 明细 |
+| **dsh-workbuddy-connect** | WorkBuddy（国内版 + 国际版） | — | ✅ 剩余积分 + 明细 |
+
+> 各插件的签到规则、额度口径与限制以各自文档为准。本表只列出经其 README 明确写出的功能，未逐项实测。
+
+### [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae)
+
+把本机已登录的 Trae 接入 DSH，国内版与国际版可同时使用。国内版支持每日签到领积分，并提供 Work / 通用积分的只读概览。注意 Trae 的签到按「每台设备每天一次」限制。
+
+```bash
+dsh plugin --profile desktop add dsh-connect-trae
+```
+
+### [dsh-qoder-connect](https://github.com/masknull/dsh-qoder-connect)
+
+以个人访问令牌（PAT）接入 Qoder，双区域独立配置。每日自动签到领取 100 Credits 算力额度，签到时刻可自定义（默认 10:00，UTC+8），并带开机防漏补签；另有侧栏额度展示与逐包明细。
+
+```bash
+dsh plugin --profile desktop add dsh-qoder-connect
+```
+
+### [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)
+
+接入 WorkBuddy 桌面 App，国内版与国际版可并存，各自使用自己的账号与积分。提供账号信息、令牌有效期与剩余积分查看，并带 CLI：
+
+```bash
+dsh plugin --profile web exec dsh-workbuddy-connect status
+```
+
+> 该插件的版本需与你的 DSH 内核严格对应（不同内核线用不同版本），安装前请见其 README 的版本对应表。
+
 ## 致谢
 
 - **[dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 本插件的灵感来源，架构与"复用本机登录态接入 DSH"的整体思路均源自该项目
 - [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — 同作者的 DSH 插件，可作为 DSH 插件结构的参照
 - [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) — 客户端 bundle 规范与凭据复用的设计参照
+
+> 上方「同类插件」中的项目均为独立开发者的作品，与本项目无隶属或背书关系，各自遵循其自身的许可与免责声明。
 
 ## 许可证
 
