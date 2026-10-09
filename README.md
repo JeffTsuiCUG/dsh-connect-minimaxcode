@@ -4,6 +4,8 @@
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
 ![version](https://img.shields.io/badge/version-0.2.2-cornflowerblue.svg)
+[![npm](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
+[![CI](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml)
 
 ## 灵感来源
 
