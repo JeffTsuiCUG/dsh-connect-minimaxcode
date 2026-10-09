@@ -46,8 +46,30 @@ const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
  * Capabilities come from upstream rather than being assumed, so a model that
  * loses tool support upstream stops advertising it here. `video` is dropped from
  * the declared input modalities because pi-ai models images, not video.
+ *
+ * Two gateway quirks are encoded here, both measured against the live endpoint:
+ *
+ * - `authorization` is why this descriptor carries `headers` at all. pi-ai's
+ *   anthropic client sends the resolved apiKey as `x-api-key`, and MiniMax
+ *   rejects that alone with 401 "token is required"; it accepts both headers, so
+ *   the bearer value is added alongside rather than replacing it.
+ * - `thinkingLevelMap.off = null` marks "thinking off" as unsupported. Every
+ *   MiniMax model here requires reasoning, and pi-ai answers an explicit
+ *   `thinkingEnabled: false` with `thinking: {type: "disabled"}`, which the
+ *   gateway refuses with `400 ... requires adaptive thinking`. Marking the level
+ *   unsupported makes pi-ai omit the field instead, which the gateway accepts
+ *   (and, correctly, hides the option that cannot work).
+ *
+ * @param model - Catalog entry to describe.
+ * @param baseUrl - Region gateway base the anthropic client extends.
+ * @param authorization - Value for the `Authorization` header, when signed in.
+ * @returns The pi-ai model descriptor.
  */
-function toPiModel(model: CatalogModel, baseUrl: string): Model<'anthropic-messages'> {
+function toPiModel(
+  model: CatalogModel,
+  baseUrl: string,
+  authorization?: string,
+): Model<'anthropic-messages'> {
   const input = model.inputModalities.includes('image') ? (['text', 'image'] as const) : (['text'] as const)
   return {
     id: model.id,
@@ -60,6 +82,8 @@ function toPiModel(model: CatalogModel, baseUrl: string): Model<'anthropic-messa
     cost: { ...NO_COST },
     contextWindow: model.contextWindow,
     maxTokens: model.maxOutputTokens ?? 128000,
+    ...(authorization === undefined ? {} : { headers: { authorization } }),
+    ...(model.reasoning ? { thinkingLevelMap: { off: null } } : {}),
   }
 }
 
@@ -70,6 +94,11 @@ export interface AdapterOptions {
   region: () => MinimaxRegion
   /** Live token, read fresh per call so a re-login takes effect at once. */
   resolveApiKey: () => Promise<string | undefined>
+  /**
+   * Live token for the `Authorization` header, read synchronously because the
+   * model descriptors that carry it are built inside `getModels()`.
+   */
+  bearerToken: () => string | undefined
 }
 
 /** What {@link createMinimaxCodeAdapter} hands back. */
@@ -90,7 +119,11 @@ export interface AdapterBundle {
  */
 export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle {
   const { catalog } = options
-  const buildModels = () => catalog.current().map((model) => toPiModel(model, chatBaseUrl(options.region())))
+  const buildModels = () => {
+    const token = options.bearerToken()
+    const authorization = token === undefined ? undefined : `Bearer ${token}`
+    return catalog.current().map((model) => toPiModel(model, chatBaseUrl(options.region()), authorization))
+  }
   const provider: Provider = { ...createProvider({
       id: MINIMAXCODE_PROVIDER_ID,
       name: 'MiniMax Code',

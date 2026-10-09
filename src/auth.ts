@@ -15,6 +15,7 @@
  * @module dsh-connect-minimaxcode/auth
  */
 
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -39,9 +40,22 @@ export type MinimaxRegion = keyof typeof MINIMAX_GATEWAYS
 /** Every region, for a fallback sweep when the configured one fails. */
 export const MINIMAX_REGIONS: readonly MinimaxRegion[] = ['cn', 'io', 'com']
 
-/** Base URL of the Anthropic-compatible endpoint on a region gateway. */
+/**
+ * Base URL for pi-ai's anthropic client on a region gateway.
+ *
+ * This must stop *before* the API version segment: the Anthropic SDK appends
+ * `/v1/messages` itself, so a base ending in `/v1` produced the doubled path
+ * `/mavis/api/v1/llm/v1/v1/messages`, which the gateway answers with
+ * `503 direct_route_not_configured`. The correct request URL is therefore
+ * `<this>/v1/messages`.
+ */
 export function chatBaseUrl(region: MinimaxRegion): string {
-  return `${MINIMAX_GATEWAYS[region]}/mavis/api/v1/llm/v1`
+  return `${MINIMAX_GATEWAYS[region]}/mavis/api/v1/llm`
+}
+
+/** Concrete Anthropic-compatible messages endpoint on a region gateway. */
+export function messagesUrl(region: MinimaxRegion): string {
+  return `${chatBaseUrl(region)}/v1/messages`
 }
 
 /** Base URL of the authoritative model catalog on a region gateway. */
@@ -136,26 +150,16 @@ export function daysRemaining(claims: TokenClaims, now = Date.now()): number {
 }
 
 /**
- * Read the desktop app's credential.
+ * Parse the app's auth document into a state.
  *
- * Every failure mode is a state rather than an exception: a user who has not
- * installed or signed in yet is a normal condition the card renders, not an
- * error the host logs on every start.
+ * Shared by the async and sync readers so the two can never disagree about what
+ * counts as signed in.
  *
- * @param env - Environment used to locate the data directory.
+ * @param text - Raw file contents.
  * @param now - Clock, injected so expiry is testable.
  * @returns The usable credential, or why there is none.
  */
-export async function readCredential(
-  env: NodeJS.ProcessEnv = process.env,
-  now = Date.now(),
-): Promise<AuthState> {
-  let text: string
-  try {
-    text = await readFile(authPath(env), 'utf8')
-  } catch {
-    return { state: 'signed-out', reason: 'app-missing' }
-  }
+export function parseAuthDocument(text: string, now = Date.now()): AuthState {
   let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(text) as Record<string, unknown>
@@ -176,6 +180,56 @@ export async function readCredential(
   }
   const updatedAtMs = typeof parsed.updatedAtMs === 'number' ? parsed.updatedAtMs : undefined
   return { state: 'signed-in', credential: { token, claims, updatedAtMs } }
+}
+
+/**
+ * Read the desktop app's credential.
+ *
+ * Every failure mode is a state rather than an exception: a user who has not
+ * installed or signed in yet is a normal condition the card renders, not an
+ * error the host logs on every start.
+ *
+ * @param env - Environment used to locate the data directory.
+ * @param now - Clock, injected so expiry is testable.
+ * @returns The usable credential, or why there is none.
+ */
+export async function readCredential(
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+): Promise<AuthState> {
+  let text: string
+  try {
+    text = await readFile(authPath(env), 'utf8')
+  } catch {
+    return { state: 'signed-out', reason: 'app-missing' }
+  }
+  return parseAuthDocument(text, now)
+}
+
+/**
+ * The bearer token for the current request, or `undefined`.
+ *
+ * pi-ai's anthropic-messages client sends the resolved `apiKey` as `x-api-key`,
+ * but MiniMax's gateway answers `{"code":401,"message":"token is required"}`
+ * unless an `Authorization: Bearer` header is also present. That header has to
+ * ride on the model descriptor ({@link Model.headers}), which is built inside
+ * the provider's synchronous `getModels()` — hence the synchronous read here.
+ * pi-ai calls `getModels()` once per operation, so the token is re-read per
+ * request and a re-login takes effect without a restart.
+ *
+ * @param env - Environment used to locate the data directory.
+ * @param now - Clock, injected so expiry is testable.
+ * @returns The token, or `undefined` when there is no usable one.
+ */
+export function bearerToken(env: NodeJS.ProcessEnv = process.env, now = Date.now()): string | undefined {
+  let text: string
+  try {
+    text = readFileSync(authPath(env), 'utf8')
+  } catch {
+    return undefined
+  }
+  const state = parseAuthDocument(text, now)
+  return state.state === 'signed-in' ? state.credential.token : undefined
 }
 
 /**

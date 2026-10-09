@@ -9,6 +9,7 @@ import {
   daysRemaining,
   expiresInMs,
   expiryLevel,
+  messagesUrl,
   readCredential,
   INERT_AUTH,
   MINIMAX_AUTH_FILENAME,
@@ -122,9 +123,22 @@ describe('paths and endpoints', () => {
     expect(expected.endsWith(MINIMAX_AUTH_FILENAME)).toBe(true)
   })
 
-  it('builds the Anthropic-compatible endpoint per region', () => {
-    expect(chatBaseUrl('cn')).toBe('https://agent.minimax.cn/mavis/api/v1/llm/v1')
-    expect(chatBaseUrl('io')).toBe('https://agent.minimax.io/mavis/api/v1/llm/v1')
+  /**
+   * The SDK base must stop before the API version segment: the Anthropic client
+   * appends `/v1/messages` itself, and a base ending in `/v1` produced the
+   * doubled path `/mavis/api/v1/llm/v1/v1/messages`, which the gateway answers
+   * with `503 direct_route_not_configured`.
+   */
+  it('builds the SDK base URL short of the version segment', () => {
+    expect(chatBaseUrl('cn')).toBe('https://agent.minimax.cn/mavis/api/v1/llm')
+    expect(chatBaseUrl('io')).toBe('https://agent.minimax.io/mavis/api/v1/llm')
+    expect(chatBaseUrl('cn')).not.toMatch(/\/v1$/)
+  })
+
+  it('appends exactly one version segment to reach the messages endpoint', () => {
+    expect(messagesUrl('cn')).toBe('https://agent.minimax.cn/mavis/api/v1/llm/v1/messages')
+    expect(messagesUrl('cn').match(/\/v1\//g)).toHaveLength(2)
+    expect(messagesUrl('cn')).not.toContain('/v1/v1/v1')
   })
 })
 

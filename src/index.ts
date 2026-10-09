@@ -13,6 +13,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls in the `webServer` Context augmentation this file relies on.
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import {
+  bearerToken,
   expiresInMs,
   expiryLevel,
   MINIMAX_REGIONS,
@@ -32,6 +33,7 @@ export {
   MINIMAX_GATEWAYS,
   MINIMAX_REGIONS,
   authPath,
+  bearerToken,
   chatBaseUrl,
   catalogUrl,
   dataDir,
@@ -39,6 +41,7 @@ export {
   decodeClaims,
   expiresInMs,
   expiryLevel,
+  parseAuthDocument,
   readCredential,
 } from './auth.ts'
 export type { AuthState, Credential, MinimaxRegion, TokenClaims } from './auth.ts'
@@ -109,6 +112,9 @@ function apply(ctx: Context) {
     catalog,
     region: () => region,
     resolveApiKey: async () => (await readNow())?.token,
+    // The gateway needs `Authorization: Bearer`, which only the model
+    // descriptor can carry; see `bearerToken` for why it reads synchronously.
+    bearerToken: () => bearerToken(),
   })
 
   // No disposer is kept: `registerAdapter` releases its routes with the fiber
