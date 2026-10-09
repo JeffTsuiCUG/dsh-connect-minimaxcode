@@ -18,6 +18,7 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { AuthContext, CredentialStore } from '@earendil-works/pi-ai'
 
 /** File the desktop app writes its runtime auth context into. */
 export const MINIMAX_AUTH_FILENAME = 'local-runtime.auth.json'
@@ -178,10 +179,29 @@ export async function readCredential(
 }
 
 /**
- * A token that satisfies no request, used where the seam demands an auth value
- * before a real one exists.
+ * Inert pi-ai auth plane.
  *
- * The provider's auth resolver substitutes the live token at call time; this
- * placeholder only keeps construction total.
+ * The minimaxcode route authenticates only through `resolveApiKey`, which reads
+ * the desktop app's token per request, so pi-ai's own credential lifecycle and
+ * ambient discovery must never manufacture a credential for it — otherwise a
+ * stale or absent store would shadow the real token.
+ *
+ * `PiAiAdapterOptions.auth` is required and takes the pi-ai pair
+ * `{ credentials, authContext }`, not a request-shaped object; every ambient
+ * question here answers "nothing stored, nothing set", and a login is refused
+ * outright rather than silently accepted.
  */
-export const INERT_AUTH = { auth: { apiKey: 'minimaxcode' } } as const
+export const INERT_AUTH: { credentials: CredentialStore; authContext: AuthContext } = {
+  credentials: {
+    async read() { return undefined },
+    async list() { return [] },
+    async modify() {
+      throw new Error('dsh-connect-minimaxcode: the minimaxcode route has no pi-ai credential lifecycle')
+    },
+    async delete() {},
+  },
+  authContext: {
+    async env() { return undefined },
+    async fileExists() { return false },
+  },
+}

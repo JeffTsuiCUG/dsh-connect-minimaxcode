@@ -10,15 +10,32 @@
  */
 
 import { createProvider } from '@earendil-works/pi-ai'
-import type { Model } from '@earendil-works/pi-ai'
+import type { Model, Provider } from '@earendil-works/pi-ai'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
+import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { MinimaxCatalog, CatalogModel } from './catalog.ts'
 import { MINIMAXCODE_PROVIDER_ID } from './catalog.ts'
-import { chatBaseUrl, type Credential, type MinimaxRegion } from './auth.ts'
+import { chatBaseUrl, type Credential, type MinimaxRegion, INERT_AUTH } from './auth.ts'
 
 /** How long a silent stream may last before the transport gives up. */
 export const MINIMAX_STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * Adapter-owned defaults a resolved route must carry.
+ *
+ * `PiAiAdapterOptions.profiles` wants a *resolved* route, so the image bounds
+ * below are the schema's own defaults (20MiB base64 payload, 2048px pixel
+ * budget, 1MiB per inline version). The retry policy is resolved by the
+ * library's public helper rather than hand-written. Both were previously hidden
+ * behind a cast, which is also what hid the missing required `auth` option.
+ */
+const REQUEST_IMAGE_BUDGETS = {
+  maxRequestImageBytes: 20 * 1024 * 1024,
+  requestImagePixelBudget: 2048 * 2048,
+  requestImageMaxBytes: 1024 * 1024,
+} as const
 
 /** Unknown price, stated as zero rather than invented. */
 const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
@@ -74,8 +91,7 @@ export interface AdapterBundle {
 export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle {
   const { catalog } = options
   const buildModels = () => catalog.current().map((model) => toPiModel(model, chatBaseUrl(options.region())))
-  const provider = {
-    ...createProvider({
+  const provider: Provider = { ...createProvider({
       id: MINIMAXCODE_PROVIDER_ID,
       name: 'MiniMax Code',
       auth: {
@@ -92,32 +108,40 @@ export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle
       models: buildModels(),
       api: anthropicMessagesApi(),
     }),
+    // Delegated to a live read: stream dispatch still runs through the
+    // constructed provider while the catalog answer tracks the upstream refresh.
     getModels: () => buildModels(),
   }
   /**
-   * Build a fresh profile for the catalog and region of this moment.
+   * Build a fresh route map for the catalog and region of this moment.
    *
    * `getModels` already reads the live catalog on every call, so the model list
-   * needs no invalidation; what a refresh does invalidate is the per-model
-   * state cached on the profile — configured maxTokens and recorded model
-   * errors, which would otherwise survive a catalog or region change.
+   * needs no invalidation; what a refresh does invalidate is the per-model state
+   * carried by the route — configured maxTokens and recorded model errors, which
+   * would otherwise outlive a catalog or region change.
    */
-  const buildProfile = () => ({
-    provider: MINIMAXCODE_PROVIDER_ID,
-    displayName: 'MiniMax Code',
-    streamIdleTimeoutMs: MINIMAX_STREAM_IDLE_TIMEOUT_MS,
-    configuredMaxTokens: new Map<string, number>(),
-    modelErrors: new Map<string, Error>(),
-    piProvider: provider,
-  })
-  let profiles = new Map([[MINIMAXCODE_PROVIDER_ID, buildProfile()]])
+  const buildProfiles = (): Map<string, ResolvedPiAiProviderProfile> => {
+    const route: ResolvedPiAiProviderProfile = {
+      provider: MINIMAXCODE_PROVIDER_ID,
+      displayName: 'MiniMax Code',
+      streamIdleTimeoutMs: MINIMAX_STREAM_IDLE_TIMEOUT_MS,
+      retryPolicy: resolveRetryPolicy(undefined, 'dsh-connect-minimaxcode retryPolicy'),
+      configuredMaxTokens: new Map(),
+      modelErrors: new Map(),
+      ...REQUEST_IMAGE_BUDGETS,
+      piProvider: provider,
+    }
+    return new Map([[MINIMAXCODE_PROVIDER_ID, route]])
+  }
+  let profiles = buildProfiles()
   return {
     adapter: new PiAiAdapter({
       profiles: () => profiles,
       resolveApiKey: options.resolveApiKey,
-    } as never),
+      auth: INERT_AUTH,
+    }),
     invalidate: () => {
-      profiles = new Map([[MINIMAXCODE_PROVIDER_ID, buildProfile()]])
+      profiles = buildProfiles()
     },
   }
 }

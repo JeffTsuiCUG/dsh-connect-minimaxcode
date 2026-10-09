@@ -10,6 +10,7 @@ import {
   expiresInMs,
   expiryLevel,
   readCredential,
+  INERT_AUTH,
   MINIMAX_AUTH_FILENAME,
 } from '../src/auth.ts'
 
@@ -124,5 +125,38 @@ describe('paths and endpoints', () => {
   it('builds the Anthropic-compatible endpoint per region', () => {
     expect(chatBaseUrl('cn')).toBe('https://agent.minimax.cn/mavis/api/v1/llm/v1')
     expect(chatBaseUrl('io')).toBe('https://agent.minimax.io/mavis/api/v1/llm/v1')
+  })
+})
+
+describe('INERT_AUTH', () => {
+  /**
+   * `PiAiAdapterOptions.auth` is required and must be the pi-ai auth pair
+   * `{ credentials, authContext }`. An earlier version passed
+   * `{ auth: { apiKey: 'minimaxcode' } }` instead, which is not that shape:
+   * pi-ai fell back to its own empty in-memory credential store and every
+   * request came back "API key is invalid" while the status card still reported
+   * `signed-in`, because the two read different things.
+   */
+  it('is the pi-ai auth pair, not a request-shaped stub', () => {
+    expect(INERT_AUTH).toHaveProperty('credentials')
+    expect(INERT_AUTH).toHaveProperty('authContext')
+    expect(INERT_AUTH).not.toHaveProperty('auth')
+  })
+
+  it('stores nothing and discovers no ambient credential', async () => {
+    await expect(INERT_AUTH.credentials.read('minimaxcode')).resolves.toBeUndefined()
+    await expect(INERT_AUTH.credentials.list()).resolves.toEqual([])
+    await expect(INERT_AUTH.authContext.env('MINIMAX_API_KEY')).resolves.toBeUndefined()
+    await expect(INERT_AUTH.authContext.fileExists('~/.minimax')).resolves.toBe(false)
+  })
+
+  it('refuses a pi-ai login, which would mask the real credential path', async () => {
+    await expect(
+      INERT_AUTH.credentials.modify('minimaxcode', async () => undefined),
+    ).rejects.toThrow()
+  })
+
+  it('accepts a delete without failing the unload path', async () => {
+    await expect(INERT_AUTH.credentials.delete('minimaxcode')).resolves.toBeUndefined()
   })
 })
