@@ -203,7 +203,7 @@ pnpm build && git add lib
 | **dsh-qoder-connect** | Qoder（国内版 + 国际版，PAT） | ✅ 每日 100 Credits | ✅ 侧栏额度小卡 + 明细 |
 | **dsh-workbuddy-connect** | WorkBuddy（国内版 + 国际版） | — | ✅ 剩余积分 + 明细 |
 
-> 各插件的签到规则、额度口径与限制以各自文档为准。本表只列出经其 README 明确写出的功能，未逐项实测。
+> 各插件的签到规则、额度口径与限制以各自文档为准。下表为同一台机器上的实测读数，仅代表当时状态，非承诺。
 
 ### [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae)
 
