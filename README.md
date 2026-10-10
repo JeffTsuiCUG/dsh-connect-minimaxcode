@@ -9,17 +9,19 @@
 
 ## 灵感来源
 
-本插件的思路直接来自 **[dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)**（作者 dingminhua）。
+本插件的思路来自 **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)**（作者 Corrine Hu）。
 
-它证明了这样一件事：**桌面 App 已经登录的模型，可以零配置地搬进 DSH**——不去碰账号密码，不引入新的鉴权体系，只是把本机已有的登录态接上一个 provider。本插件把同一套做法用在了 MiniMax Code 上：
+它最早证明了这样一件事：**桌面 App 已经登录的模型，可以零配置地搬进 DSH**——不去碰账号密码，不引入新的鉴权体系，只是把本机已有的登录态接上一个 provider，并复用 DSH 自带的 provider 适配器。本插件把同一套做法用在了 MiniMax Code 上：
 
-| | dsh-connect-workbuddy | 本插件 |
+| | dsh-workbuddy-connect | 本插件 |
 |---|---|---|
 | 数据来源 | WorkBuddy 桌面 App 的本地登录态 | MiniMax Code 桌面 App 的本地登录态 |
 | 接入方式 | 注册 DSH provider，暴露已登录模型 | 同左 |
 | 目录来源 | 上游实时模型列表 | 同左 |
 
-该项目的架构（插件结构、provider 注册、只读复用登录态）也是本插件的主要参照，致谢见文末。
+同方向的另一实现是 **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)**，本插件在**插件结构与 provider 注册的组织方式**上参考了同一作者的 [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae)（该项目的连接内核本身也参照了 corrinehu 的实现，见其 README 致谢）。
+
+> 两者的价值可以这样区分：**corrinehu 是最早的开创者**，「复用本机登录态」的路线由它确立；**dingminhua 的实现更贴近 DSH 插件结构的既有约定**，本插件的目录布局与 `cordis.patch.yml` 写法沿用了后者。二者都已列入文末致谢。
 
 ---
 
@@ -233,9 +235,9 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 
 ## 致谢
 
-- **[dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 本插件的灵感来源，架构与"复用本机登录态接入 DSH"的整体思路均源自该项目
-- [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — 同作者的 DSH 插件，可作为 DSH 插件结构的参照
-- [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect) — 客户端 bundle 规范与凭据复用的设计参照
+- **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** — **本插件的灵感来源**。「复用桌面 App 本机登录态、把已登录模型接进 DSH」的整体思路由该项目最早确立，本插件沿用同一做法；凭据只读复用的设计也参照于此。
+- **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 同方向的另一实现，本插件的**插件结构与 provider 注册组织方式**参考了它（其连接内核亦参照 corrinehu 的实现，见该项目致谢）。
+- [dingminhua/dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — 同作者的 DSH 插件，可作为 DSH 插件结构的参照。
 
 > 上方「同类插件」中的项目均为独立开发者的作品，与本项目无隶属或背书关系，各自遵循其自身的许可与免责声明。
 
