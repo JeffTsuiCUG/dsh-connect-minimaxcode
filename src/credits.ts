@@ -382,8 +382,9 @@ export interface CreditSnapshot {
  * One grant of credits.
  *
  * Credits are granted in lots, and each lot carries its own expiry: the
- * desktop app grants credits daily, and every lot falls due about a month
- * later on a day of its own. Credits in a lot are lost when that day arrives.
+ * desktop app grants credits daily, and a lot falls due thirty calendar days
+ * after the day it was granted, at midnight in the account's own timezone.
+ * Credits in a lot are lost when that moment arrives.
  */
 export interface CreditLot {
   /** How much this lot was granted. */
@@ -433,9 +434,12 @@ export function parseCreditLots(document: unknown): CreditLot[] {
 /**
  * Fetch the credit ledger.
  *
- * The ledger is paginated, so every page is read. The number of pages comes
- * from the account's own `total_count` rather than from a guess, and a lot
- * count that stops growing ends the walk.
+ * The ledger is paginated, and the page parameter is `page_number` — `page`
+ * is accepted and then ignored, which would make every page return the same
+ * rows. The page size is capped upstream at 100.
+ *
+ * The default view already excludes expired grants, which is what this wants:
+ * a grant that expired has nothing left to lose.
  */
 export async function fetchCreditLots(
   credential: OAuthCredential,
@@ -447,17 +451,20 @@ export async function fetchCreditLots(
   let page = 1
   let total = Number.POSITIVE_INFINITY
   while (lots.length < total && page <= 50) {
-    const url = `${MINIMAX_ACCOUNT_HOSTS[region]}${CREDIT_DETAILS_PATH}?page=${page}&page_size=${pageSize}`
+    const url = `${MINIMAX_ACCOUNT_HOSTS[region]}${CREDIT_DETAILS_PATH}?page_number=${page}&page_size=${pageSize}`
     const response = await fetchImpl(url, { headers: { authorization: `Bearer ${credential.token}` } })
     if (!response.ok) {
       throw new Error(`credit ledger request failed: HTTP ${response.status}`)
     }
     const document = await response.json() as Record<string, unknown>
     const batch = parseCreditLots(document)
+    const before = lots.length
     lots.push(...batch)
     const count = toNumber(document.total_count)
     if (count !== undefined) total = count
     if (batch.length < pageSize) break
+    // A page that adds nothing new would otherwise loop forever.
+    if (lots.length === before) break
     page += 1
   }
   return lots

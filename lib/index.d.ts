@@ -312,8 +312,9 @@ interface CreditSnapshot {
  * One grant of credits.
  *
  * Credits are granted in lots, and each lot carries its own expiry: the
- * desktop app grants credits daily, and every lot falls due about a month
- * later on a day of its own. Credits in a lot are lost when that day arrives.
+ * desktop app grants credits daily, and a lot falls due thirty calendar days
+ * after the day it was granted, at midnight in the account's own timezone.
+ * Credits in a lot are lost when that moment arrives.
  */
 interface CreditLot {
   /** How much this lot was granted. */

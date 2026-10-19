@@ -186,14 +186,14 @@ Content-Type: application/json
 
 ### 积分会过期吗？会
 
-积分不是一池子，而是**按笔发放的批次**，每批有自己的到期日。客户端每天发一批，每批大约在**发放后 29 天**到期，于是形成一条逐日错开的 30 天阶梯：
+积分不是一池子，而是**按笔发放的批次**，每批有自己的到期日。客户端每天发一批，每批在**发放日 + 30 个自然日**到期（按账户所在时区，当日 00:00 失效），于是形成一条逐日错开的 30 天阶梯：
 
 ```
-GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page=1&page_size=100
-→ details[] { granted_amount, remaining_amount, consumed_amount, granted_at_ms, expire_at_ms }
+GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page_number=1&page_size=100
+→ details[] { granted_amount, remaining_amount, consumed_amount, granted_at_ms, expire_at_ms, credit_type }
 ```
 
-实测本机 23 笔：09-20 发的在 10-19 到期，09-21 发的在 10-20 到期……另有一笔 08-25 发的在 **2027-08-25** 到期（一年期批次）。
+实测本机 23 笔：09-20 发的在 10-20 到期、09-21 发的在 10-21 到期……另有一笔 08-25 发的在 2027-08-25 到期（一年期批次，`credit_type` 1=购买 / 2=签到）。**到期日一律读 `expire_at_ms`**，不写死天数——至少存在 30 天与 365 天两种制式。
 
 插件据此在**插件页面**（设置 → 插件 → DSH Connect MiniMax Code）与输入框下方的胶囊里给出：
 
@@ -202,9 +202,11 @@ GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page=1&page_siz
 - 接下来几笔**到期批次**的清单（日期 + 金额）
 - 余额条与本机消耗（token 数、等效金额）
 
-只统计**仍有余额**的批次：已发放但用光的批次到期时并没有东西可损失，把它算进去会让每个账号都看起来"快过期了"。
+只统计**仍有余额**的批次：已发放但用光的批次到期时并没有东西可损失，把它算进去会让每个账号都看起来"快过期了"。积分的消耗近似先进先出，所以**"7 天内到期"的金额常常是 0**（快到期的那些基本都已被用完），因此界面同时给出**最早到期时间**，那才是真正有意义的信号。
 
-> 台账的 `remaining_amount` 合计与余额接口的 `total_remaining_amount` 会**略有出入**（实测差 0.006，浮点累加所致；两次采样之间余额本身也会变）。插件以**余额接口**显示总额，台账只用来回答"什么时候过期"。
+> 过期不会把批次里的 `remaining_amount` 清零（实测会留下 -0.31 这样的负值残留），而是把过期批次**排除在余额之外**；所以总额以余额接口为准。
+>
+> 台账的 `remaining_amount` 合计与余额接口的 `total_remaining_amount` 在**静止期逐位相等**；两次采样之间看到的差异，是账户在这段时间里被真实消耗掉的量。
 
 ### 消耗怎么算
 

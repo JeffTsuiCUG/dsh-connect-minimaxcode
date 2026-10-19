@@ -12,6 +12,7 @@ import {
   MinimaxCredits,
   ensureOAuthCredential,
   expiresInMs,
+  fetchCreditLots,
   needsRefresh,
   parseCreditLots,
   parseCreditSummary,
@@ -192,6 +193,31 @@ describe('credit lots and expiry', () => {
     expect(summary.expiring).toBe(400)
     expect(summary.expiringLots).toBe(1)
     expect(summary.upcoming[0]).toEqual({ amount: 400, expireAtMs: NOW + 3 * DAY })
+  })
+
+  it('pages the ledger with the parameter the upstream reads', async () => {
+    const asked: string[] = []
+    const fetchImpl = (async (url: string) => {
+      asked.push(String(url))
+      return {
+        ok: true,
+        json: async () => ({ total_count: 1, details: [{
+          granted_amount: '10.00',
+          remaining_amount: '10.00',
+          consumed_amount: '0.00',
+          granted_at_ms: NOW,
+          expire_at_ms: NOW + DAY,
+          credit_type: 2,
+        }] }),
+      }
+    }) as unknown as typeof fetch
+    await fetchCreditLots(CREDENTIAL, 'cn', fetchImpl)
+    expect(asked).toHaveLength(1)
+    // `page` is accepted and then ignored upstream, so asking for it would
+    // return the same rows for every page.
+    expect(asked[0]).toContain('page_number=1')
+    expect(asked[0]).toContain('page_size=100')
+    expect(asked[0]).not.toMatch(/[?&]page=/)
   })
 })
 
