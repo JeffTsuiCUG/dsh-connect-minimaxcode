@@ -267,6 +267,14 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 历史版本见 [GitHub Releases](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/releases) 与 [npm 版本列表](https://www.npmjs.com/package/dsh-connect-minimaxcode?activeTab=versions)。
 
+## 市场收录与展示
+
+插件已包含可安装的 `dsh.bundle` manifest，并发布到 npm。社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的收录条目已提交为 PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110)，仓库内保留了一份草稿与操作说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)。
+
+市场截图按当前约定由**插件自己仓库根目录的** `screenshots.json` 声明（注册表 `data/screenshots.json` 是旧约定下的回退，不再新增键）。
+
+> 界面胶囊放在**输入框下方的 dock**，而不是输入框工具栏：工具栏是**共享插槽**，外壳自己的控件和别的插件都注册在那里，无法保证每个占用者都可见——同族插件就因为这个原因丢过一次读数。
+
 ## 卸载
 
 ```bash
