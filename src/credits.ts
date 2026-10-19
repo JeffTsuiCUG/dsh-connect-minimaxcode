@@ -379,6 +379,135 @@ export interface CreditSnapshot {
 }
 
 /**
+ * One grant of credits.
+ *
+ * Credits are granted in lots, and each lot carries its own expiry: the
+ * desktop app grants credits daily, and every lot falls due about a month
+ * later on a day of its own. Credits in a lot are lost when that day arrives.
+ */
+export interface CreditLot {
+  /** How much this lot was granted. */
+  granted: number
+  /** How much of it is left. */
+  remaining: number
+  /** How much of it has been used. */
+  consumed: number
+  /** When the lot was granted, in milliseconds since the epoch. */
+  grantedAtMs: number
+  /** When the lot expires, in milliseconds since the epoch. */
+  expireAtMs: number
+  /** The upstream's kind of lot, when it says. */
+  creditType?: number
+}
+
+/**
+ * Read the credit lots out of a ledger response.
+ *
+ * Lots that carry no expiry are ignored: a lot without an expiry date would
+ * otherwise be treated as one that never expires.
+ */
+export function parseCreditLots(document: unknown): CreditLot[] {
+  if (typeof document !== 'object' || document === null) return []
+  const details = (document as Record<string, unknown>).details
+  if (!Array.isArray(details)) return []
+  const lots: CreditLot[] = []
+  for (const entry of details) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const record = entry as Record<string, unknown>
+    const expireAtMs = toNumber(record.expire_at_ms)
+    if (expireAtMs === undefined) continue
+    const granted = toNumber(record.granted_amount) ?? 0
+    const remaining = toNumber(record.remaining_amount) ?? 0
+    lots.push({
+      granted,
+      remaining,
+      consumed: toNumber(record.consumed_amount) ?? Math.max(0, granted - remaining),
+      grantedAtMs: toNumber(record.granted_at_ms) ?? 0,
+      expireAtMs,
+      creditType: toNumber(record.credit_type),
+    })
+  }
+  return lots.sort((a, b) => a.expireAtMs - b.expireAtMs)
+}
+
+/**
+ * Fetch the credit ledger.
+ *
+ * The ledger is paginated, so every page is read. The number of pages comes
+ * from the account's own `total_count` rather than from a guess, and a lot
+ * count that stops growing ends the walk.
+ */
+export async function fetchCreditLots(
+  credential: OAuthCredential,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CreditLot[]> {
+  const pageSize = 100
+  const lots: CreditLot[] = []
+  let page = 1
+  let total = Number.POSITIVE_INFINITY
+  while (lots.length < total && page <= 50) {
+    const url = `${MINIMAX_ACCOUNT_HOSTS[region]}${CREDIT_DETAILS_PATH}?page=${page}&page_size=${pageSize}`
+    const response = await fetchImpl(url, { headers: { authorization: `Bearer ${credential.token}` } })
+    if (!response.ok) {
+      throw new Error(`credit ledger request failed: HTTP ${response.status}`)
+    }
+    const document = await response.json() as Record<string, unknown>
+    const batch = parseCreditLots(document)
+    lots.push(...batch)
+    const count = toNumber(document.total_count)
+    if (count !== undefined) total = count
+    if (batch.length < pageSize) break
+    page += 1
+  }
+  return lots
+}
+
+/** How many days of expiry the plugin calls "about to expire". */
+export const EXPIRING_WINDOW_DAYS = 7
+
+/** How many days it looks ahead for the wider bucket. */
+export const EXPIRING_HORIZON_DAYS = 30
+
+/** What the lots say about credits that are about to be lost. */
+export interface ExpirySummary {
+  /** Credits in lots that expire within {@link EXPIRING_WINDOW_DAYS} days. */
+  expiring: number
+  /** How many lots that is. */
+  expiringLots: number
+  /** Credits in lots that expire within {@link EXPIRING_HORIZON_DAYS} days. */
+  expiringSoon: number
+  /** When the next lot with credits left expires. */
+  nextExpiryAtMs?: number
+  /** The next lots with credits left, soonest first. */
+  upcoming: { amount: number; expireAtMs: number }[]
+  /** Credits left across every lot. */
+  totalRemaining: number
+}
+
+/**
+ * Summarize what is about to expire.
+ *
+ * Only lots that still hold credits count: a lot that was granted and used up
+ * expires with nothing to lose, and counting it would make every account look
+ * like it is about to lose credits.
+ */
+export function summarizeExpiry(lots: readonly CreditLot[], now = Date.now()): ExpirySummary {
+  const alive = lots.filter(lot => lot.remaining > 0 && lot.expireAtMs > now)
+  const within = (days: number) => alive.filter(lot => lot.expireAtMs - now <= days * 86_400_000)
+  const week = within(EXPIRING_WINDOW_DAYS)
+  const month = within(EXPIRING_HORIZON_DAYS)
+  return {
+    expiring: week.reduce((sum, lot) => sum + lot.remaining, 0),
+    expiringLots: week.length,
+    expiringSoon: month.reduce((sum, lot) => sum + lot.remaining, 0),
+    nextExpiryAtMs: alive[0]?.expireAtMs,
+    upcoming: alive.slice(0, 5).map(lot => ({ amount: lot.remaining, expireAtMs: lot.expireAtMs })),
+    totalRemaining: lots.reduce((sum, lot) => sum + lot.remaining, 0),
+  }
+}
+
+/**
  * Keeps the current balance and the change between reads.
  *
  * The first read has nothing to compare against, so it reports no movement
@@ -387,6 +516,10 @@ export interface CreditSnapshot {
 export class MinimaxCredits {
   #snapshot: CreditSnapshot | undefined
   #error: string | undefined
+  #lots: CreditLot[] = []
+  #expiry: ExpirySummary | undefined
+  #ledgerAtMs: number | undefined
+  #ledgerError: string | undefined
 
   /** The balance as last read. */
   get snapshot(): CreditSnapshot | undefined {
@@ -398,8 +531,32 @@ export class MinimaxCredits {
     return this.#error
   }
 
+  /** The credit lots as last read. */
+  get lots(): readonly CreditLot[] {
+    return this.#lots
+  }
+
+  /** What the lots say about expiry, when the ledger could be read. */
+  get expiry(): ExpirySummary | undefined {
+    return this.#expiry
+  }
+
+  /** When the ledger was last read. */
+  get ledgerAtMs(): number | undefined {
+    return this.#ledgerAtMs
+  }
+
+  /** Why the ledger could not be read, when it could not. */
+  get ledgerError(): string | undefined {
+    return this.#ledgerError
+  }
+
   /**
    * Read the balance and record how much was consumed since the last read.
+   *
+   * The credit ledger is read alongside it, but a ledger that cannot be read
+   * never hides the balance: the two come from different endpoints and only
+   * the balance is essential.
    *
    * @returns Whether the balance changed.
    */
@@ -409,23 +566,49 @@ export class MinimaxCredits {
     fetchImpl: typeof fetch = fetch,
     now = Date.now(),
   ): Promise<boolean> {
+    let changed = false
     try {
       const summary = await fetchCreditSummary(credential, region, fetchImpl)
       if (summary === undefined) {
         this.#error = 'membership response carried no credit summary'
-        return false
+      } else {
+        const previous = this.#snapshot
+        this.#snapshot = {
+          summary,
+          fetchedAtMs: now,
+          consumed: previous === undefined ? 0 : previous.summary.total - summary.total,
+        }
+        this.#error = undefined
+        changed = previous === undefined || previous.summary.total !== summary.total
       }
-      const previous = this.#snapshot
-      this.#snapshot = {
-        summary,
-        fetchedAtMs: now,
-        consumed: previous === undefined ? 0 : previous.summary.total - summary.total,
-      }
-      this.#error = undefined
-      return previous === undefined || previous.summary.total !== summary.total
     } catch (error) {
       this.#error = error instanceof Error ? error.message : String(error)
-      return false
+    }
+    await this.refreshLedger(credential, region, fetchImpl, now)
+    return changed
+  }
+
+  /**
+   * Read the credit ledger and work out what is about to expire.
+   *
+   * A failure here is remembered but never thrown: the balance is what the
+   * user needs most, and a ledger that is temporarily unavailable must not
+   * take it down with it.
+   */
+  async refreshLedger(
+    credential: OAuthCredential,
+    region: MinimaxRegion,
+    fetchImpl: typeof fetch = fetch,
+    now = Date.now(),
+  ): Promise<void> {
+    try {
+      const lots = await fetchCreditLots(credential, region, fetchImpl)
+      this.#lots = lots
+      this.#expiry = summarizeExpiry(lots, now)
+      this.#ledgerAtMs = now
+      this.#ledgerError = undefined
+    } catch (error) {
+      this.#ledgerError = error instanceof Error ? error.message : String(error)
     }
   }
 }

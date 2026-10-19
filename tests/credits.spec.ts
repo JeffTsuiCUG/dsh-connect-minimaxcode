@@ -13,9 +13,11 @@ import {
   ensureOAuthCredential,
   expiresInMs,
   needsRefresh,
+  parseCreditLots,
   parseCreditSummary,
   parseOAuthDocument,
   readOAuthCredential,
+  summarizeExpiry,
   type OAuthCredential,
 } from '../src/credits.ts'
 
@@ -112,6 +114,84 @@ describe('parseCreditSummary', () => {
   it('reports nothing when the account carries no balance', () => {
     expect(parseCreditSummary({ plan_type: 1 })).toBeUndefined()
     expect(parseCreditSummary(null)).toBeUndefined()
+  })
+})
+
+describe('credit lots and expiry', () => {
+  const DAY = 86_400_000
+  const NOW = Date.parse('2026-10-19T12:00:00Z')
+
+  /** A ledger shaped like the upstream's. */
+  const ledger = {
+    total_count: 3,
+    details: [
+      {
+        granted_amount: '400.00',
+        remaining_amount: '0.00',
+        consumed_amount: '400.00',
+        granted_at_ms: NOW - 29 * DAY,
+        expire_at_ms: NOW - DAY,
+        credit_type: 2,
+      },
+      {
+        granted_amount: '1000.00',
+        remaining_amount: '58.09',
+        consumed_amount: '941.91',
+        granted_at_ms: NOW - 20 * DAY,
+        expire_at_ms: NOW + 9 * DAY,
+        credit_type: 2,
+      },
+      {
+        granted_amount: '2000.00',
+        remaining_amount: '2000.00',
+        consumed_amount: '0.00',
+        granted_at_ms: NOW - 2 * DAY,
+        expire_at_ms: NOW + 27 * DAY,
+        credit_type: 2,
+      },
+    ],
+  }
+
+  it('reads the lots, soonest expiry first', () => {
+    const lots = parseCreditLots(ledger)
+    expect(lots).toHaveLength(3)
+    expect(lots[0]?.remaining).toBe(0)
+    expect(lots[1]?.remaining).toBe(58.09)
+    expect(lots[1]?.expireAtMs).toBe(NOW + 9 * DAY)
+    expect(lots[2]?.remaining).toBe(2000)
+  })
+
+  it('ignores a lot without an expiry date', () => {
+    const lots = parseCreditLots({ details: [{ granted_amount: '10', remaining_amount: '10' }] })
+    expect(lots).toEqual([])
+  })
+
+  it('counts only the credits that are actually at risk', () => {
+    const summary = summarizeExpiry(parseCreditLots(ledger), NOW)
+    // The lot that expired yesterday is used up, and the 27-day lot is not
+    // within the week: only the 58.09 due in nine days counts as near.
+    expect(summary.expiring).toBe(0)
+    expect(summary.expiringLots).toBe(0)
+    expect(summary.expiringSoon).toBe(2058.09)
+    expect(summary.nextExpiryAtMs).toBe(NOW + 9 * DAY)
+    expect(summary.totalRemaining).toBe(2058.09)
+  })
+
+  it('counts a lot that expires inside the week', () => {
+    const soon = {
+      details: [{
+        granted_amount: '400.00',
+        remaining_amount: '400.00',
+        consumed_amount: '0.00',
+        granted_at_ms: NOW - 25 * DAY,
+        expire_at_ms: NOW + 3 * DAY,
+        credit_type: 2,
+      }],
+    }
+    const summary = summarizeExpiry(parseCreditLots(soon), NOW)
+    expect(summary.expiring).toBe(400)
+    expect(summary.expiringLots).toBe(1)
+    expect(summary.upcoming[0]).toEqual({ amount: 400, expireAtMs: NOW + 3 * DAY })
   })
 })
 

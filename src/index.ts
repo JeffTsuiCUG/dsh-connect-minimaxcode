@@ -166,6 +166,7 @@ function apply(ctx: Context) {
   /** The credit balance as the card and the browser half read it. */
   const buildCreditStatus = (): CreditStatus => {
     const snapshot = credits.snapshot
+    const expiry = credits.expiry
     if (snapshot === undefined) {
       return { state: creditState, ...credits.error === undefined ? {} : { error: credits.error } }
     }
@@ -176,6 +177,17 @@ function apply(ctx: Context) {
       free: snapshot.summary.free,
       consumed: snapshot.consumed,
       updatedAtMs: snapshot.fetchedAtMs,
+      ...expiry === undefined
+        ? {}
+        : {
+            expiring: expiry.expiring,
+            expiringLots: expiry.expiringLots,
+            expiringSoon: expiry.expiringSoon,
+            nextExpiryAtMs: expiry.nextExpiryAtMs,
+            upcoming: expiry.upcoming,
+          },
+      ...credits.ledgerAtMs === undefined ? {} : { ledgerAtMs: credits.ledgerAtMs },
+      ...credits.ledgerError === undefined ? {} : { ledgerError: credits.ledgerError },
     }
   }
 

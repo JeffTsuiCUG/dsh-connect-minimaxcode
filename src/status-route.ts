@@ -30,6 +30,20 @@ export interface CreditStatus {
   updatedAtMs?: number
   /** Why the balance could not be read. */
   error?: string
+  /** Credits that expire within the next week. */
+  expiring?: number
+  /** How many grants that is. */
+  expiringLots?: number
+  /** Credits that expire within the next month. */
+  expiringSoon?: number
+  /** When the next grant with credits left expires. */
+  nextExpiryAtMs?: number
+  /** The next grants with credits left, soonest first. */
+  upcoming?: { amount: number; expireAtMs: number }[]
+  /** When the ledger was read, in milliseconds since the epoch. */
+  ledgerAtMs?: number
+  /** Why the ledger could not be read. */
+  ledgerError?: string
 }
 
 /** What the plugin's own requests have used. */

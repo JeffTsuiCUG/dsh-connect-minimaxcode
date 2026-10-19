@@ -18,7 +18,18 @@ const CLIENT_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', '
 
 /** The status document the pill reads. */
 const STATUS = {
-  credits: { state: 'ok', total: 11326.884, purchased: 0, free: 11326.884, consumed: 12.5 },
+  credits: {
+    state: 'ok',
+    total: 11326.884,
+    purchased: 0,
+    free: 11326.884,
+    consumed: 12.5,
+    expiring: 2858.09,
+    expiringLots: 2,
+    expiringSoon: 9258.09,
+    nextExpiryAtMs: Date.parse('2026-10-29T00:00:00Z'),
+    upcoming: [{ amount: 2858.09, expireAtMs: Date.parse('2026-10-29T00:00:00Z') }],
+  },
   usage: {
     inputTokens: 1200,
     outputTokens: 340,
@@ -71,7 +82,7 @@ function reactHarness() {
 interface Loaded {
   registrations: { id: string; factory(require: (id: string) => unknown): { inject: string[]; apply(ctx: unknown): void } }[]
   slotNames: string[]
-  slots: { options: { name: string; id?: string; order?: number }; component: (props: unknown) => unknown }[]
+  slots: { options: { name: string; id?: string; key?: string; order?: number }; component: (props: unknown) => unknown }[]
 }
 
 /** Load the built artifact the way the host's loader does. */
@@ -136,10 +147,42 @@ describe('client bundle', () => {
       },
       effect: (effect: () => unknown) => effect(),
     })
-    expect(loaded.slotNames).toEqual(['conversation.composer.dock'])
-    expect(loaded.slots).toHaveLength(1)
+    expect(loaded.slotNames).toEqual(['conversation.composer.dock', 'plugins.bundle.config'])
+    expect(loaded.slots).toHaveLength(2)
     expect(loaded.slots[0]?.options.name).toBe('conversation.composer.dock')
     expect(loaded.slots[0]?.options.id).toBe('minimax-credits')
+    // The page card is keyed by the package name, which is how the plugins
+    // page finds the entry that belongs to this bundle.
+    expect(loaded.slots[1]?.options.name).toBe('plugins.bundle.config')
+    expect(loaded.slots[1]?.options.key).toBe('dsh-connect-minimaxcode')
+  })
+
+  it('shows the credits that are about to expire', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    let page: ((props: unknown) => unknown) | undefined
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (_options: unknown, rendered: (props: unknown) => unknown) => {
+          page = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    // The first render subscribes to the shared store, which starts the
+    // ticker; the second render sees what it fetched. Without a `t` prop the
+    // card falls back to its own copy, so the text is the real Chinese one.
+    harness.render(page!, { view: 'page' })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const tree = JSON.stringify(harness.render(page!, { view: 'page' }))
+    expect(tree).toContain('即将过期')
+    expect(tree).toContain('2,858.09')
+    expect(tree).toContain('2026-10-29')
+    expect(tree).toMatch(/11[,.]?326[.,]88/)
   })
 
   it('renders the balance it was given', async () => {

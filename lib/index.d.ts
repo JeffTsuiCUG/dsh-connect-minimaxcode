@@ -309,6 +309,45 @@ interface CreditSnapshot {
   consumed: number;
 }
 /**
+ * One grant of credits.
+ *
+ * Credits are granted in lots, and each lot carries its own expiry: the
+ * desktop app grants credits daily, and every lot falls due about a month
+ * later on a day of its own. Credits in a lot are lost when that day arrives.
+ */
+interface CreditLot {
+  /** How much this lot was granted. */
+  granted: number;
+  /** How much of it is left. */
+  remaining: number;
+  /** How much of it has been used. */
+  consumed: number;
+  /** When the lot was granted, in milliseconds since the epoch. */
+  grantedAtMs: number;
+  /** When the lot expires, in milliseconds since the epoch. */
+  expireAtMs: number;
+  /** The upstream's kind of lot, when it says. */
+  creditType?: number;
+}
+/** What the lots say about credits that are about to be lost. */
+interface ExpirySummary {
+  /** Credits in lots that expire within {@link EXPIRING_WINDOW_DAYS} days. */
+  expiring: number;
+  /** How many lots that is. */
+  expiringLots: number;
+  /** Credits in lots that expire within {@link EXPIRING_HORIZON_DAYS} days. */
+  expiringSoon: number;
+  /** When the next lot with credits left expires. */
+  nextExpiryAtMs?: number;
+  /** The next lots with credits left, soonest first. */
+  upcoming: {
+    amount: number;
+    expireAtMs: number;
+  }[];
+  /** Credits left across every lot. */
+  totalRemaining: number;
+}
+/**
  * Keeps the current balance and the change between reads.
  *
  * The first read has nothing to compare against, so it reports no movement
@@ -320,12 +359,32 @@ declare class MinimaxCredits {
   get snapshot(): CreditSnapshot | undefined;
   /** Why the last read failed, when one did. */
   get error(): string | undefined;
+  /** The credit lots as last read. */
+  get lots(): readonly CreditLot[];
+  /** What the lots say about expiry, when the ledger could be read. */
+  get expiry(): ExpirySummary | undefined;
+  /** When the ledger was last read. */
+  get ledgerAtMs(): number | undefined;
+  /** Why the ledger could not be read, when it could not. */
+  get ledgerError(): string | undefined;
   /**
    * Read the balance and record how much was consumed since the last read.
+   *
+   * The credit ledger is read alongside it, but a ledger that cannot be read
+   * never hides the balance: the two come from different endpoints and only
+   * the balance is essential.
    *
    * @returns Whether the balance changed.
    */
   refresh(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<boolean>;
+  /**
+   * Read the credit ledger and work out what is about to expire.
+   *
+   * A failure here is remembered but never thrown: the balance is what the
+   * user needs most, and a ledger that is temporarily unavailable must not
+   * take it down with it.
+   */
+  refreshLedger(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<void>;
 }
 //#endregion
 //#region src/usage.d.ts
@@ -434,6 +493,23 @@ interface CreditStatus {
   updatedAtMs?: number;
   /** Why the balance could not be read. */
   error?: string;
+  /** Credits that expire within the next week. */
+  expiring?: number;
+  /** How many grants that is. */
+  expiringLots?: number;
+  /** Credits that expire within the next month. */
+  expiringSoon?: number;
+  /** When the next grant with credits left expires. */
+  nextExpiryAtMs?: number;
+  /** The next grants with credits left, soonest first. */
+  upcoming?: {
+    amount: number;
+    expireAtMs: number;
+  }[];
+  /** When the ledger was read, in milliseconds since the epoch. */
+  ledgerAtMs?: number;
+  /** Why the ledger could not be read. */
+  ledgerError?: string;
 }
 /** What the plugin's own requests have used. */
 interface UsageStatus {
