@@ -14,6 +14,41 @@ import { daysRemaining, expiryLevel, MINIMAX_REGIONS } from './auth.ts'
 /** Route this plugin mounts, matching its settings card. */
 export const MINIMAX_STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
 
+/** The account's credit balance, as the desktop app shows it. */
+export interface CreditStatus {
+  /** Whether the balance could be read. */
+  state: 'ok' | 'unavailable' | 'expired' | 'signed-out'
+  /** Remaining credits, free plus purchased. */
+  total?: number
+  /** Remaining purchased credits. */
+  purchased?: number
+  /** Remaining free (granted) credits. */
+  free?: number
+  /** Credits consumed between the two last reads. */
+  consumed?: number
+  /** When the balance was read, in milliseconds since the epoch. */
+  updatedAtMs?: number
+  /** Why the balance could not be read. */
+  error?: string
+}
+
+/** What the plugin's own requests have used. */
+export interface UsageStatus {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  /** Equivalent amount of everything this host spent, in 元. */
+  estimatedCny: number
+  /** The equivalent amount of the last request, in 元. */
+  lastCny?: number
+  /** The model of the last request. */
+  lastModel?: string
+  /** How many requests were measured. */
+  requests: number
+}
+
 /** What the card renders. */
 export interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired'
@@ -30,6 +65,10 @@ export interface StatusDocument {
   models?: { id: string; name: string; contextWindow: number }[]
   /** Whether a catalog refresh is in flight. */
   refreshing?: boolean
+  /** The account's credit balance, when it could be read. */
+  credits?: CreditStatus
+  /** What this host's requests have used. */
+  usage?: UsageStatus
 }
 
 /** Inputs the document is derived from. */
@@ -45,6 +84,10 @@ export interface StatusDeps {
   catalogError?: string
   models: { id: string; name: string; contextWindow: number }[]
   refreshing: boolean
+  /** The account's credit balance, when the account API could be reached. */
+  credits?: CreditStatus
+  /** What this host's requests have used. */
+  usage?: UsageStatus
 }
 
 const HINTS: Record<string, string> = {
@@ -70,6 +113,8 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.catalogError === undefined ? {} : { catalogError: deps.catalogError },
     models: deps.models,
     refreshing: deps.refreshing,
+    ...deps.credits === undefined ? {} : { credits: deps.credits },
+    ...deps.usage === undefined ? {} : { usage: deps.usage },
   }
   if (auth.state === 'expired') {
     return {

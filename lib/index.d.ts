@@ -1,5 +1,5 @@
 import "@earendil-works/pi-ai";
-import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
+import { LlmAdapter } from "@deepseek-ai/dsh-llm";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/auth.d.ts
 /** File the desktop app writes its runtime auth context into. */
@@ -197,9 +197,260 @@ declare class MinimaxCatalog {
   get identity(): string | undefined;
 }
 //#endregion
+//#region src/credits.d.ts
+/** The desktop app's own OAuth client id. */
+declare const MINIMAX_OAUTH_CLIENT_ID = "mcode-public";
+/** Membership endpoint: carries the credit summary. */
+declare const MEMBERSHIP_PATH = "/matrix/api/v1/commerce/get_membership_info";
+/** The OAuth credential the account endpoints accept. */
+interface OAuthCredential {
+  /** The `mmoat_` bearer token. */
+  token: string;
+  /** The refresh token, when the app stored one. */
+  refreshToken?: string;
+  /** Expiry in milliseconds since the epoch, when known. */
+  expiresAtMs?: number;
+  /** The client the token was issued to. */
+  clientId: string;
+  /** Scopes the token carries. */
+  scopes: string[];
+  /** Audience the token was issued for. */
+  audience: string;
+  /** The app's login generation; preserved verbatim on write-back. */
+  generation?: number;
+}
+/** Why the account data may be unavailable. */
+type OAuthState = {
+  state: 'signed-in';
+  credential: OAuthCredential;
+} | {
+  state: 'expired';
+  credential: OAuthCredential;
+} | {
+  state: 'signed-out';
+  reason: 'app-missing' | 'not-signed-in' | 'unreadable' | 'malformed';
+};
+/**
+ * Parse the app's credential document.
+ *
+ * The record key is generated per install, so the record is found by value
+ * rather than by a hard-coded name.
+ */
+declare function parseOAuthDocument(text: string, now?: number): OAuthState;
+/**
+ * Read the desktop app's OAuth credential.
+ *
+ * Every failure is a state, not an exception: an app that is not installed, or
+ * not signed in, is a normal condition the UI renders rather than an error the
+ * host logs on every request.
+ */
+declare function readOAuthCredential(region: MinimaxRegion, env?: NodeJS.ProcessEnv, now?: number): Promise<OAuthState>;
+/**
+ * Exchange the stored refresh token for a fresh access token.
+ *
+ * The authorization server rotates the refresh token, so the new pair is
+ * written back into the app's own file, in the app's own format, with an
+ * atomic replace. `generation` is left untouched on purpose: the app uses it
+ * to decide whether a stored credential still belongs to its own login, and
+ * raising it would make the app believe it had been signed in elsewhere.
+ */
+declare function refreshOAuthCredential(region: MinimaxRegion, credential: OAuthCredential, env?: NodeJS.ProcessEnv, now?: number, fetchImpl?: typeof fetch): Promise<OAuthState>;
+/**
+ * Write a rotated credential back into the app's store.
+ *
+ * The document is rewritten as a whole so the app's own reader keeps seeing
+ * the shape it wrote, and the replace is atomic so a crash mid-write cannot
+ * leave a truncated credential file behind.
+ */
+declare function writeOAuthCredential(region: MinimaxRegion, credential: OAuthCredential, env?: NodeJS.ProcessEnv): Promise<void>;
+/**
+ * Read the credential, refreshing it when it is close to expiry.
+ *
+ * A refresh is only attempted for a credential the app already stored, and
+ * only when it is actually stale: a fresh token is left alone, so the plugin
+ * never competes with the app for the same grant.
+ */
+declare function ensureOAuthCredential(region: MinimaxRegion, env?: NodeJS.ProcessEnv, now?: number, fetchImpl?: typeof fetch): Promise<OAuthState>;
+/** The credit balance the desktop app shows. */
+interface CreditSummary {
+  /** Remaining credits, free plus purchased. */
+  total: number;
+  /** Remaining purchased credits. */
+  purchased: number;
+  /** Remaining free (granted) credits. */
+  free: number;
+}
+/**
+ * Read the credit summary out of a membership response.
+ *
+ * The app's settings page prefers the summary and falls back to the flat
+ * balance fields, so the same fallback chain is used here.
+ */
+declare function parseCreditSummary(document: unknown): CreditSummary | undefined;
+/**
+ * Fetch the current credit balance.
+ *
+ * @returns The balance, or `undefined` when the account has no credit summary.
+ */
+declare function fetchCreditSummary(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<CreditSummary | undefined>;
+/** The balance plus what changed since the previous read. */
+interface CreditSnapshot {
+  summary: CreditSummary;
+  /** Milliseconds since the epoch, when the balance was read. */
+  fetchedAtMs: number;
+  /**
+   * Credits consumed since the previous read.
+   *
+   * The upstream balance is a live counter, so the difference between two
+   * reads is the credits actually spent in between. It can be negative when
+   * credits are granted (the app grants credits daily), and it counts every
+   * client of the account, not just this one.
+   */
+  consumed: number;
+}
+/**
+ * Keeps the current balance and the change between reads.
+ *
+ * The first read has nothing to compare against, so it reports no movement
+ * rather than pretending the whole balance was spent.
+ */
+declare class MinimaxCredits {
+  #private;
+  /** The balance as last read. */
+  get snapshot(): CreditSnapshot | undefined;
+  /** Why the last read failed, when one did. */
+  get error(): string | undefined;
+  /**
+   * Read the balance and record how much was consumed since the last read.
+   *
+   * @returns Whether the balance changed.
+   */
+  refresh(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<boolean>;
+}
+//#endregion
+//#region src/usage.d.ts
+/**
+ * What a conversation actually cost.
+ *
+ * Every response from the gateway carries its own usage counters, so the
+ * consumption of a session can be measured exactly rather than estimated from
+ * the transcript. The upstream sends four numbers, and the distinction
+ * between them matters: `input_tokens` counts only the tokens that missed the
+ * prompt cache, so a naive sum understates a long conversation badly.
+ *
+ * The conversion to money uses MiniMax's published domestic price list
+ * (元/百万 tokens). It is an equivalent amount, not a charge: the credits the
+ * desktop app shows are a separate resource, and MiniMax publishes no
+ * numeric exchange rate between the two.
+ *
+ * @module dsh-connect-minimaxcode/usage
+ */
+/** Token counts of one request, as the gateway reported them. */
+interface ModelUsage {
+  /** Tokens sent that missed the prompt cache. */
+  inputTokens: number;
+  /** Tokens produced. */
+  outputTokens: number;
+  /** Tokens served from the prompt cache. */
+  cacheReadTokens: number;
+  /** Tokens written into the prompt cache. */
+  cacheWriteTokens: number;
+  /** Tokens spent reasoning, when the model reports them separately. */
+  reasoningTokens: number;
+}
+/** An empty usage record. */
+declare const EMPTY_USAGE: ModelUsage;
+/** Prices in 元 per million tokens, from MiniMax's domestic price list. */
+interface ModelPrice {
+  input: number;
+  output: number;
+  cacheRead: number;
+}
+/** The published domestic prices of the models this plugin serves. */
+declare const MODEL_PRICES: Readonly<Record<string, ModelPrice>>;
+/**
+ * The price for one model at one input size.
+ *
+ * M3 is billed in two tiers: requests above 512k input tokens cost double.
+ * The tier is decided by the billed input, which is the uncached input plus
+ * the cache read.
+ */
+declare function priceFor(model: string, billedInputTokens: number): ModelPrice | undefined;
+/**
+ * The equivalent amount of one request, in 元.
+ *
+ * Returns `undefined` for a model without a published price, rather than
+ * pretending the request was free.
+ */
+declare function estimateCny(model: string, usage: ModelUsage): number | undefined;
+/** One recorded request. */
+interface UsageRecord {
+  model: string;
+  usage: ModelUsage;
+  /** Equivalent amount in 元, when the model has a published price. */
+  cny?: number;
+}
+/**
+ * Accumulates what the sessions routed through this plugin have used.
+ *
+ * The meter is the plugin's own view: it counts the requests this host made,
+ * with the counters the gateway returned. It is not the account's total, and
+ * it is not the credit balance — the balance comes from the account API.
+ */
+declare class UsageMeter {
+  #private;
+  /** Every recorded request, oldest first. */
+  get records(): readonly UsageRecord[];
+  /** The most recent request. */
+  get last(): UsageRecord | undefined;
+  /** Record one request's usage. */
+  record(model: string, usage: ModelUsage): UsageRecord;
+  /** Totals across every recorded request. */
+  totals(): ModelUsage;
+  /** Totals per model. */
+  byModel(): ReadonlyMap<string, ModelUsage>;
+  /** The equivalent amount of everything recorded, in 元. */
+  estimatedCny(): number;
+  /** Forget everything recorded. */
+  reset(): void;
+}
+//#endregion
 //#region src/status-route.d.ts
 /** Route this plugin mounts, matching its settings card. */
 declare const MINIMAX_STATUS_PATH = "/plugins/dsh-connect-minimaxcode/status";
+/** The account's credit balance, as the desktop app shows it. */
+interface CreditStatus {
+  /** Whether the balance could be read. */
+  state: 'ok' | 'unavailable' | 'expired' | 'signed-out';
+  /** Remaining credits, free plus purchased. */
+  total?: number;
+  /** Remaining purchased credits. */
+  purchased?: number;
+  /** Remaining free (granted) credits. */
+  free?: number;
+  /** Credits consumed between the two last reads. */
+  consumed?: number;
+  /** When the balance was read, in milliseconds since the epoch. */
+  updatedAtMs?: number;
+  /** Why the balance could not be read. */
+  error?: string;
+}
+/** What the plugin's own requests have used. */
+interface UsageStatus {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  /** Equivalent amount of everything this host spent, in 元. */
+  estimatedCny: number;
+  /** The equivalent amount of the last request, in 元. */
+  lastCny?: number;
+  /** The model of the last request. */
+  lastModel?: string;
+  /** How many requests were measured. */
+  requests: number;
+}
 /** What the card renders. */
 interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired';
@@ -220,6 +471,10 @@ interface StatusDocument {
   }[];
   /** Whether a catalog refresh is in flight. */
   refreshing?: boolean;
+  /** The account's credit balance, when it could be read. */
+  credits?: CreditStatus;
+  /** What this host's requests have used. */
+  usage?: UsageStatus;
 }
 /** Inputs the document is derived from. */
 interface StatusDeps {
@@ -238,6 +493,10 @@ interface StatusDeps {
     contextWindow: number;
   }[];
   refreshing: boolean;
+  /** The account's credit balance, when the account API could be reached. */
+  credits?: CreditStatus;
+  /** What this host's requests have used. */
+  usage?: UsageStatus;
 }
 /**
  * Build the card's status document.
@@ -263,10 +522,23 @@ interface AdapterOptions {
    * model descriptors that carry it are built inside `getModels()`.
    */
   bearerToken: () => string | undefined;
+  /**
+   * Called with the usage the gateway reported for a finished request.
+   *
+   * The counters come from the upstream response, not from an estimate of the
+   * transcript, so what is reported is what was actually billed.
+   */
+  onUsage?: (model: string, usage: ModelUsage) => void;
 }
 /** What {@link createMinimaxCodeAdapter} hands back. */
 interface AdapterBundle {
-  adapter: PiAiAdapter;
+  /**
+   * The adapter the host registers.
+   *
+   * It is the pi-ai adapter itself, or a wrapper around it that copies the
+   * usage counters out of the stream.
+   */
+  adapter: LlmAdapter;
   /** Drop cached profiles so the next pick rebuilds them. */
   invalidate: () => void;
 }
@@ -297,4 +569,4 @@ declare const inject: string[];
  */
 declare function apply(ctx: Context): void;
 //#endregion
-export { type AuthState, type CatalogModel, type CatalogSource, type Credential, FALLBACK_MODELS, MINIMAXCODE_PROVIDER_ID, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MinimaxCatalog, type MinimaxRegion, type StatusDocument, type TokenClaims, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, expiresInMs, expiryLevel, inject, name, parseAuthDocument, parseCatalog, readCredential, statusDocument };
+export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, inject, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, priceFor, readCredential, readOAuthCredential, refreshOAuthCredential, statusDocument, writeOAuthCredential };

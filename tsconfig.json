@@ -16,5 +16,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["node_modules", "lib"]
+  "exclude": ["node_modules", "lib", "src/client.ts"]
 }

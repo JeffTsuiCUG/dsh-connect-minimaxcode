@@ -2,7 +2,7 @@
   "name": "dsh-connect-minimaxcode",
   "displayName": "DSH Connect MiniMax Code",
   "description": "把本机已登录的 MiniMax Code 桌面 App 的模型接入 DeepSeek Harness：复用其登录态，提供 Anthropic Messages 兼容接入与动态模型目录。",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "author": "JeffTsuiCUG",
   "license": "MIT",
   "private": false,
@@ -30,6 +30,7 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -41,10 +42,10 @@
   ],
   "scripts": {
     "prepack": "npm run build",
-    "build": "tsdown",
+    "build": "tsdown && tsc -p tsconfig.client.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.client.json",
+    "check": "npm run typecheck && npm run build && npm run test"
   },
   "keywords": [
     "dsh-plugin",
@@ -76,6 +77,15 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ]
     }
   }
 }

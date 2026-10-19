@@ -12,12 +12,15 @@
 import { createProvider } from '@earendil-works/pi-ai'
 import type { Model, Provider } from '@earendil-works/pi-ai'
 import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messages.lazy'
+import { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, PreparedAdapterCall, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { MinimaxCatalog, CatalogModel } from './catalog.ts'
 import { MINIMAXCODE_PROVIDER_ID } from './catalog.ts'
 import { chatBaseUrl, type Credential, type MinimaxRegion, INERT_AUTH } from './auth.ts'
+import type { ModelUsage } from './usage.ts'
 
 /** How long a silent stream may last before the transport gives up. */
 export const MINIMAX_STREAM_IDLE_TIMEOUT_MS = 10 * 60 * 1000
@@ -99,13 +102,93 @@ export interface AdapterOptions {
    * model descriptors that carry it are built inside `getModels()`.
    */
   bearerToken: () => string | undefined
+  /**
+   * Called with the usage the gateway reported for a finished request.
+   *
+   * The counters come from the upstream response, not from an estimate of the
+   * transcript, so what is reported is what was actually billed.
+   */
+  onUsage?: (model: string, usage: ModelUsage) => void
 }
 
 /** What {@link createMinimaxCodeAdapter} hands back. */
 export interface AdapterBundle {
-  adapter: PiAiAdapter
+  /**
+   * The adapter the host registers.
+   *
+   * It is the pi-ai adapter itself, or a wrapper around it that copies the
+   * usage counters out of the stream.
+   */
+  adapter: LlmAdapter
   /** Drop cached profiles so the next pick rebuilds them. */
   invalidate: () => void
+}
+
+/**
+ * An adapter that reports what each request used.
+ *
+ * The usage counters ride on the stream the gateway already sends, so
+ * measuring costs nothing extra: the chunk is copied out of the stream and
+ * handed to the callback, and the chunk itself still reaches the host
+ * unchanged. Both entry points are covered — the plain stream and the one a
+ * prepared call dispatches through — because the host may use either.
+ */
+class MeteredAdapter extends LlmAdapter {
+  readonly #inner: PiAiAdapter
+  readonly #onUsage: (model: string, usage: ModelUsage) => void
+
+  constructor(inner: PiAiAdapter, onUsage: (model: string, usage: ModelUsage) => void) {
+    super()
+    this.#inner = inner
+    this.#onUsage = onUsage
+  }
+
+  providerInfo(provider: string): LlmProviderInfo {
+    return this.#inner.providerInfo(provider)
+  }
+
+  providerRetryPolicy(provider: string): ResolvedRetryPolicy | undefined {
+    return this.#inner.providerRetryPolicy(provider)
+  }
+
+  listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    return this.#inner.listModels(provider)
+  }
+
+  resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
+    return this.#inner.resolveModel(provider, model, signal)
+  }
+
+  async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    const prepared = await this.#inner.prepareCall(provider, model, signal)
+    return { ...prepared, stream: (options: GenerateOptions) => this.#metered(prepared.stream(options), model) }
+  }
+
+  stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    return this.#metered(this.#inner.stream(options), options.model)
+  }
+
+  /** Copy the usage out of a stream, leaving the stream itself untouched. */
+  #metered(chunks: AsyncIterable<StreamChunk>, model: string): AsyncIterable<StreamChunk> {
+    const onUsage = this.#onUsage
+    return {
+      async *[Symbol.asyncIterator]() {
+        for await (const chunk of chunks) {
+          if (chunk.type === 'usage') {
+            const usage = chunk.usage
+            onUsage(model, {
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              cacheReadTokens: usage.cacheReadTokens ?? 0,
+              cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+              reasoningTokens: usage.reasoningTokens ?? 0,
+            })
+          }
+          yield chunk
+        }
+      },
+    }
+  }
 }
 
 /**
@@ -167,12 +250,16 @@ export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle
     return new Map([[MINIMAXCODE_PROVIDER_ID, route]])
   }
   let profiles = buildProfiles()
+  const inner = new PiAiAdapter({
+    profiles: () => profiles,
+    resolveApiKey: options.resolveApiKey,
+    auth: INERT_AUTH,
+  })
+  const adapter = options.onUsage === undefined
+    ? inner
+    : new MeteredAdapter(inner, options.onUsage)
   return {
-    adapter: new PiAiAdapter({
-      profiles: () => profiles,
-      resolveApiKey: options.resolveApiKey,
-      auth: INERT_AUTH,
-    }),
+    adapter,
     invalidate: () => {
       profiles = buildProfiles()
     },

@@ -41,9 +41,11 @@
 
 - **零配置**：自动读取 MiniMax Code 桌面 App 的登录态，不在 DSH 中存储任何明文 Token
 - **动态模型目录**：从上游接口实时拉取，模型增减无需更新插件
+- **积分余额可见**：在对话框底部的胶囊里显示 MiniMax Code 的剩余积分，以及本机累计消耗
+- **实时消耗统计**：每次请求的 token 用量取自上游响应本身，可按官方价目表折算等效金额
 - **复用官方适配器**：上游为标准 Anthropic Messages 协议，直接复用 DSH 自带 provider，工具调用、推理块、上下文压缩均由 DSH 托管
-- **只读**：插件不写入、不修改 MiniMax 的任何文件，也不执行任何登录或续期动作
-- **不含客户端 UI**：不注册浏览器侧插件，因此不会影响 DSH 的启动（见「已知限制」）
+- **只读为主**：除「续期已过期的桌面 App 登录态」外，不写入、不修改 MiniMax 的任何文件，也不执行任何登录动作
+- **界面不打扰**：胶囊只在输入框下方的 dock 里占一行，不改动 DSH 的其它界面
 
 ## 前置条件
 
@@ -69,6 +71,8 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
 安装后**无需重启**，插件会热加载；模型随后出现在模型选择器的 **MiniMax Code** 分组中。
+
+> 界面胶囊（积分余额）属于浏览器侧插件，**首次安装或升级到 0.3.0 后需要重启一次 DSH** 才会出现在输入框下方。
 
 ### 若安装被 `allowBuilds` 拦截
 
@@ -97,15 +101,24 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
    直接使用即可。工具调用由 DSH 本地工具执行，插件只负责提供模型通路。
 
 5. **令牌过期时重新登录**
-   MiniMax Code 的登录令牌为短期 JWT（通常约 15 天），本插件**不会自动续期**。过期后：
+   MiniMax Code 有**两份互不通用**的登录态，本插件各用其一：
+
+   | 凭证 | 位置 | 有效期 | 用途 |
+   |---|---|---|---|
+   | JWT | `~/.minimax/local-runtime.auth.json` | 约 15 天 | 调模型网关（`/mavis/api/v1/llm/v1/messages`） |
+   | OAuth（`mmoat_`） | `~/.minimax/auth/prod/<region>/mcode-public/auth.json` | 约 1 小时 | 读账户与积分（`/matrix/api/v1/commerce/get_membership_info`） |
+
+   两份凭证互不通用：拿 JWT 打账户接口一律 `401`，拿 OAuth 令牌打模型网关同样不通。**模型对话**用 JWT，**积分显示**用 OAuth。
 
    | 现象 | 含义 | 处理方式 |
    |---|---|---|
-   | 正常使用 | 令牌有效 | — |
-   | 剩余不足 24 小时 | 令牌即将失效 | 打开一次 MiniMax Code 桌面 App 刷新 |
-   | 请求返回鉴权错误 | 令牌已失效 | 在 MiniMax Code 中**重新登录**，然后重启 DSH |
+   | 正常使用 | 两份凭证都有效 | — |
+   | 模型报鉴权错误 | JWT 已失效 | 在 MiniMax Code 中**重新登录**，然后重启 DSH |
+   | 积分胶囊显示「登录态已过期」 | OAuth 令牌过期 | 插件会用 App 自己的 refresh token 续期并写回；若续期失败，请打开一次 MiniMax Code 桌面 App 让它自行续期 |
 
-   > 令牌过期不会丢失数据。在 MiniMax Code 桌面 App 重新登录后，它会自动写入新的令牌，插件下次启动即可读到。
+   > OAuth 令牌过期**不会**影响模型对话：JWT 仍然有效，模型照常可用，只是积分胶囊暂时拿不到余额。
+   >
+   > 续期会**轮换** refresh token。插件因此把新的一对令牌按客户端**原格式原子写回**同一个文件，并保持 `generation` 不变——客户端靠它判断「这份凭据是否仍属于本次登录」，擅自抬高会让桌面 App 误判为异地登录。
 
 ### 关于响应速度
 
@@ -122,6 +135,8 @@ MiniMax 的这些模型**强制要求先推理再输出**，思考无法关闭�
 1. 读取 `~/.minimax/local-runtime.auth.json`（MiniMax Code 写入的明文登录信息），**仅在内存中**解析其 JWT
 2. 调用 `GET /mavis/api/v1/models` 获取实时模型目录（含上下文长度、多模态、工具调用等能力声明）
 3. 注册 `minimaxcode` provider，指向 `POST /mavis/api/v1/llm/v1/messages`（标准 Anthropic Messages 协议）
+4. 读取 `~/.minimax/auth/prod/<region>/mcode-public/auth.json` 的 OAuth 令牌，按需续期
+5. 调用 `POST /matrix/api/v1/commerce/get_membership_info` 获取积分余额，通过插件自己的状态接口 `/plugins/dsh-connect-minimaxcode/status` 交给界面胶囊
 
 ### 与网关对接时的三个兼容处理
 
@@ -135,44 +150,82 @@ MiniMax 的这些模型**强制要求先推理再输出**，思考无法关闭�
 
 插件**不**包含任何硬编码的 Token、账号或接口密钥。
 
-## 为什么没有额度显示
+## 积分余额与用量
 
-「显示剩余额度」这个功能被实测排除过，结论写在这里以免后来者重复调查。
+对话框输入框下方的胶囊会显示 MiniMax Code 的**剩余积分**；点开还能看到赠送/购买拆分、两次读取之间的消耗，以及本机累计的 token 与等效金额。
 
-**额度数据是真实存在的**。逆向 MiniMax Code 客户端可确认它使用了这样一组字段：
+### 余额从哪里来
+
+MiniMax Code 桌面 App 自己每天在调一个「会员信息」接口，响应里就带着客户端设置页显示的那三个数字：
 
 ```
-op_credit_summary: {
-  total_remaining_amount,      // 总剩余额度
-  purchased_remaining_amount,  // 购买额度剩余
-  free_remaining_amount        // 免费额度剩余
+POST https://agent.minimax.cn/matrix/api/v1/commerce/get_membership_info
+Authorization: Bearer <桌面 App 的 mmoat_ OAuth 令牌>
+Content-Type: application/json
+
+{}
+```
+
+```json
+"op_credit_summary": {
+  "total_remaining_amount": "11459.454",      // 总剩余积分
+  "purchased_remaining_amount": "0",           // 其中购买的
+  "free_remaining_amount": "11459.454"         // 其中赠送的
 }
 ```
 
-**但找不到为它服务的接口**。已验证的部分：
+插件读的就是 `op_credit_summary.total_remaining_amount`。**注意别取错字段**：同一个响应里的 `total_remains_credit` 与 `opcredit_balance` 是旧账，在已迁移到积分池的账号上恒为 `0`，取它们会显示「0 积分」。
 
-| 尝试 | 结果 |
-|---|---|
-| `GET /v1/api/user/info` + 模型网关令牌 | `401`，两类凭证互不通用 |
-| `GET /v1/api/user/info` + 客户端 OAuth 令牌（`mmoat_`） | `200`，但响应只有昵称、头像、`vipInfo` 等账户资料，**不含任何额度字段** |
-| 14 个候选额度路径（`user/credits`、`user/quota`、`workspace/list`、`credit/summary` 等） | 全部 `404` |
-| `account.minimax.cn` 同一批路径 | 同样无额度字段 |
+顺带一提，这里有三个**单位不同**的「钱」，别混：
 
-上述额度字段只出现在客户端**已混淆的前端 bundle** 中，属于渲染逻辑；真正提供数据的接口路径未能定位。实测所用的 OAuth 凭证有效期约 1 小时，由客户端自动续期，不适合作为插件的长期依赖。
+| 数值 | 含义 | 本插件是否显示 |
+|---|---|---|
+| `op_credit_summary.total_remaining_amount` | Code 积分余额 | ✅ 就是它 |
+| `token_plan_credit.remaining_credits` | 已购积分池 | ❌ |
+| `query_balance.available_amount` | 开放平台钱包（元） | ❌ |
 
-因此本插件不显示额度。若你已知可用路径，欢迎提Issue 或 PR；额度请直接在 MiniMax Code 客户端中查看。
+### 消耗怎么算
+
+两路数据各管一件事：
+
+- **真实积分消耗**：余额是个活值，两次读取的差值就是这段时间真正花掉的积分（客户端也会并发消耗，所以差值含其它客户端的开销）。
+- **本机消耗**：每次请求的响应都自带 `usage`（`input_tokens` / `output_tokens` / `cache_creation_input_tokens` / `cache_read_input_tokens`），插件原样累计。折算金额时**只用这四个分量自己算**，不能用任何 `total_token` 汇总值——上游的两级汇总口径不同（差 1.94 倍，差额正是缓存读取部分）。单价取自 [MiniMax 官方价目表](https://platform.minimax.cn/docs/pricing/overview)：
+
+  | 模型 | 输入 | 输出 | 缓存读取 |
+  |---|---|---|---|
+  | `MiniMax-M3.1-Flash` | 1.00 元/百万 tokens | 4.00 | 0.10 |
+  | `MiniMax-M3`（≤512k 输入） | 2.10 | 8.40 | 0.42 |
+  | `MiniMax-M3`（>512k 输入） | 4.20 | 16.80 | 0.84 |
+
+  折算出的金额是**等效金额**，不是扣费：积分与金额之间 MiniMax 没有公开换算关系（套餐只公布了 1×/3×/12× 的相对倍数），所以插件不会把它说成「花了多少积分」。
+
+### 关于续期
+
+OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自己的令牌已过期时**才用 App 已存的 refresh token 续一次，并把轮换后的新令牌按客户端**原格式原子写回**同一个文件（`generation` 保持不变），因此桌面 App 的登录态不受影响。插件不会发起登录、不会登出、也不会调用任何付费/订阅类接口。
+
+> 这一节的结论与 0.2.x 的「无法显示额度」相反。当时的调查按 `credits` / `quota` / `summary` 这类英文语义猜路径，真实接口用的是 `commerce` / `membership` 这套计费域词汇，因此全部落空；后来是从桌面 App 自己的运行日志（`%APPDATA%\MiniMax\logs\api-*.log`）里读出它每天真实调用的 URL，才定位到这条路径。
 
 ## 已知限制
 
 - **仅支持国内版（`agent.minimax.cn`）**。国际版网关是否可用**未经验证**，请勿据此推断其他区域可用。
 - **必须开启推理**。MiniMax 的全部模型都声明需要推理，关不掉。首字延迟因此高于非推理模型。
 - **未登录时模型列表是内置兜底**。此时选择器中仍会显示 `M3`、`M3.1-Flash` 两个内置条目，但它们无法真正调用；登录后才会切换为上游实时目录。判断是否可用，请以实际调用结果为准。
-- **不提供余额/用量显示**。这一项经过实测后确认无法实现，原因记录在下方「为什么没有额度显示」中。
-- **不自动续期令牌**，请参照上方「令牌有效期」。
-- **不提供设置界面卡片**。本插件为纯宿主侧插件，不在 DSH 设置页注册任何卡片，因此不会参与浏览器端的启动流程（这同时也是它不会导致 DSH 启动失败的原因）。
-- **上游接口非公开**，MiniMax 客户端更新后可能失效。
+- **积分只覆盖 MiniMax Code 的赠送/购买积分**，不包含开放平台钱包余额与已购积分池，插件也不会把金额折算成积分。
+- **余额是账户级数值**，两次读取的差值包含 MiniMax Code 其它客户端的并发消耗；本机单独的消耗看胶囊里的 token 数与等效金额。
+- **等效金额是按公开价目表折算的估值**，不是实际扣费；官方未公开 token 与积分的换算关系。
+- **OAuth 令牌过期时积分胶囊会暂时失效**，需打开一次 MiniMax Code 桌面 App 让它自行续期（或等待插件续期成功）。这不影响模型对话。
+- **不提供设置界面卡片**。插件不在 DSH 设置页注册卡片；界面只增加输入框下方的一枚胶囊。
+- **上游接口非公开**，MiniMax 客户端更新后可能失效。余额接口失效时胶囊会显示「积分不可用」，不会影响模型对话。
 
 ## 更新记录
+
+### 0.3.0（2026-10-19）
+
+- **新增积分余额显示**：对话框输入框下方的胶囊显示 MiniMax Code 的剩余积分（赠送/购买拆分），点开可看两次读取之间的消耗、本机累计 token 与按官方价目表折算的等效金额。
+- **新增用量计量**：每次请求的 `usage` 取自上游响应本身，累计到本机并折算金额。
+- **新增账户接口定位**：找到桌面 App 每天真实调用的 `POST /matrix/api/v1/commerce/get_membership_info`，并**推翻了 0.2.x 「无法显示额度」的结论**——原因见「积分余额与用量」末尾。
+- **令牌策略调整**：模型网关用 JWT、账户接口用桌面 App 的 OAuth 令牌；后者过期时插件会用 App 已存的 refresh token 续期，并按客户端原格式写回，不影响桌面 App 登录态。
+- **首次带浏览器侧插件**：新增 `lib/client.js`（classic script），只注册一枚 composer dock 胶囊。**升级后需重启一次 DSH**。
 
 ### 0.2.3（2026-10-19）
 
@@ -197,6 +250,8 @@ pnpm build       # 构建
 ```
 
 构建依赖 `@earendil-works/pi-ai`，需与宿主中 `dsh-llm-pi-ai` 解析出的版本一致（当前为 `0.85.x`），否则类型不兼容。
+
+界面半边（`src/client.ts`）由 `tsconfig.client.json` 单独编译成 **classic script**（`lib/client.js`）：宿主以 `<script>` 方式加载客户端 bundle，若产出 ESM 会直接导致 Web 启动失败（`Cannot use import statement outside a module`），所以这里刻意不用打包器、也不自带 React——React 来自宿主的浏览器模块表。
 
 **`lib/` 是纳入版本管理的构建产物**，不是生成物。这是刻意为之：git 源安装拿到的是仓库原样内容，若不含 `lib/`，pnpm 会判定该包"需要构建"并触发 `prepare`，随即被构建脚本白名单拦下。改动源码后请重新构建并提交：
 

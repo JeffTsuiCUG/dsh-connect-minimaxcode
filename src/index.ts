@@ -23,10 +23,28 @@ import {
 } from './auth.ts'
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
-import { MINIMAX_STATUS_PATH, isLoopback, statusDocument } from './status-route.ts'
+import { MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type UsageStatus } from './status-route.ts'
+import { MinimaxCredits, ensureOAuthCredential } from './credits.ts'
+import { UsageMeter } from './usage.ts'
 
 export { MINIMAXCODE_PROVIDER_ID, MinimaxCatalog, parseCatalog, FALLBACK_MODELS } from './catalog.ts'
 export type { CatalogModel, CatalogSource } from './catalog.ts'
+export {
+  MinimaxCredits,
+  ensureOAuthCredential,
+  fetchCreditSummary,
+  parseCreditSummary,
+  parseOAuthDocument,
+  readOAuthCredential,
+  refreshOAuthCredential,
+  writeOAuthCredential,
+  MEMBERSHIP_PATH,
+  MINIMAX_OAUTH_CLIENT_ID,
+  type CreditSummary,
+  type OAuthCredential,
+  type OAuthState,
+} from './credits.ts'
+export { EMPTY_USAGE, MODEL_PRICES, UsageMeter, estimateCny, priceFor, type ModelUsage } from './usage.ts'
 export {
   MINIMAX_AUTH_FILENAME,
   MINIMAX_DATA_DIR,
@@ -69,6 +87,14 @@ function pickRegion(preferred: string | undefined): MinimaxRegion {
 const CATALOG_TTL_MS = 5 * 60 * 1000
 
 /**
+ * How often the account's credit balance may be re-read.
+ *
+ * The balance is a live counter upstream, but it is an account-wide value:
+ * reading it too often buys nothing except load on the account API.
+ */
+const CREDIT_TTL_MS = 30 * 1000
+
+/**
  * Compose the plugin.
  *
  * The credential is re-read on every request rather than cached at start: the
@@ -79,10 +105,14 @@ const CATALOG_TTL_MS = 5 * 60 * 1000
  */
 function apply(ctx: Context) {
   const catalog = new MinimaxCatalog()
+  const credits = new MinimaxCredits()
+  const meter = new UsageMeter()
   let region: MinimaxRegion = 'cn'
   let credential: Credential | undefined
   let lastCatalogAtMs = 0
+  let lastCreditAtMs = 0
   let refreshing = false
+  let creditState: 'ok' | 'unavailable' | 'expired' | 'signed-out' = 'unavailable'
 
   const readNow = async (): Promise<Credential | undefined> => {
     const state = await readCredential()
@@ -108,6 +138,64 @@ function apply(ctx: Context) {
     }
   }
 
+  /**
+   * Read the account's credit balance, at most once per TTL.
+   *
+   * The account API needs the desktop app's own OAuth token, not the model
+   * gateway's JWT, so this reads a second credential file. A stale token is
+   * refreshed through the app's own grant and written back in the app's own
+   * format, which keeps the app signed in.
+   */
+  const refreshCredits = async (): Promise<void> => {
+    const now = Date.now()
+    if (now - lastCreditAtMs < CREDIT_TTL_MS) return
+    lastCreditAtMs = now
+    const state = await ensureOAuthCredential(region, process.env, now)
+    if (state.state === 'signed-out') {
+      creditState = 'signed-out'
+      return
+    }
+    if (state.state === 'expired') {
+      creditState = 'expired'
+      return
+    }
+    await credits.refresh(state.credential, region, fetch, now)
+    creditState = credits.snapshot === undefined ? 'unavailable' : 'ok'
+  }
+
+  /** The credit balance as the card and the browser half read it. */
+  const buildCreditStatus = (): CreditStatus => {
+    const snapshot = credits.snapshot
+    if (snapshot === undefined) {
+      return { state: creditState, ...credits.error === undefined ? {} : { error: credits.error } }
+    }
+    return {
+      state: 'ok',
+      total: snapshot.summary.total,
+      purchased: snapshot.summary.purchased,
+      free: snapshot.summary.free,
+      consumed: snapshot.consumed,
+      updatedAtMs: snapshot.fetchedAtMs,
+    }
+  }
+
+  /** What this host's own requests have used. */
+  const buildUsageStatus = (): UsageStatus => {
+    const totals = meter.totals()
+    const last = meter.last
+    return {
+      inputTokens: totals.inputTokens,
+      outputTokens: totals.outputTokens,
+      cacheReadTokens: totals.cacheReadTokens,
+      cacheWriteTokens: totals.cacheWriteTokens,
+      reasoningTokens: totals.reasoningTokens,
+      estimatedCny: meter.estimatedCny(),
+      ...last?.cny === undefined ? {} : { lastCny: last.cny },
+      ...last === undefined ? {} : { lastModel: last.model },
+      requests: meter.records.length,
+    }
+  }
+
   const { adapter, invalidate } = createMinimaxCodeAdapter({
     catalog,
     region: () => region,
@@ -115,6 +203,14 @@ function apply(ctx: Context) {
     // The gateway needs `Authorization: Bearer`, which only the model
     // descriptor can carry; see `bearerToken` for why it reads synchronously.
     bearerToken: () => bearerToken(),
+    // Every response carries its own usage counters, so the consumption of
+    // this host is measured rather than estimated.
+    onUsage: (model, usage) => {
+      meter.record(model, usage)
+      // A finished request is the moment the balance moved, so it is also the
+      // moment worth re-reading it.
+      void refreshCredits()
+    },
   })
 
   // No disposer is kept: `registerAdapter` releases its routes with the fiber
@@ -134,6 +230,9 @@ function apply(ctx: Context) {
       : state.state === 'expired'
         ? { state: 'expired' as const }
         : { state: 'signed-out' as const, reason: state.reason }
+    // The balance is read on demand: a card that is never opened costs the
+    // account API nothing.
+    await refreshCredits()
     return statusDocument({
       auth,
       region,
@@ -141,6 +240,8 @@ function apply(ctx: Context) {
       catalogError: catalog.error,
       models: catalog.current().map(({ id, name: modelName, contextWindow }) => ({ id, name: modelName, contextWindow })),
       refreshing,
+      credits: buildCreditStatus(),
+      usage: buildUsageStatus(),
     })
   }
 
