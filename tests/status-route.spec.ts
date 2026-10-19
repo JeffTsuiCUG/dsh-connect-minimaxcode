@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { statusDocument, isLoopback, MINIMAX_STATUS_PATH } from '../src/status-route.ts'
 
-const MODELS = [{ id: 'MiniMax-M2.7', name: 'M2.7', contextWindow: 200000 }]
+const MODELS = [{ id: 'MiniMax-M3.1-Flash', name: 'M3.1-Flash', contextWindow: 512000 }]
 
 function base(overrides: Partial<Parameters<typeof statusDocument>[0]> = {}) {
   return {

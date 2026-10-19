@@ -3,7 +3,7 @@
 把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![version](https://img.shields.io/badge/version-0.2.2-cornflowerblue.svg)
+![version](https://img.shields.io/badge/version-0.2.3-cornflowerblue.svg)
 [![npm](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
 [![CI](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml)
 
@@ -91,7 +91,7 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
 2. **安装插件**（见上一步的命令），等待热加载完成。
 
 3. **选择模型**
-   打开 DSH 的模型选择器，在 **MiniMax Code** 分组下选择模型。可用模型来自上游实时目录，例如 `M2.7`、`M2.7-highspeed`、`M3`、`M3.1-Flash-Preview`。
+   打开 DSH 的模型选择器，在 **MiniMax Code** 分组下选择模型。可用模型来自上游实时目录，例如 `M3`、`M3.1-Flash`。
 
 4. **正常对话**
    直接使用即可。工具调用由 DSH 本地工具执行，插件只负责提供模型通路。
@@ -111,7 +111,7 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
 
 MiniMax 的这些模型**强制要求先推理再输出**，思考无法关闭。因此：
 
-- 首个字符出现前会有一段等待（实测 M3.1-Flash-Preview 约 3 秒）
+- 首个字符出现前会有一段等待（实测 M3.1-Flash 约 3 秒）
 - 推理过程会以 `thinking` 块实时返回，可以在界面中看到模型"在想什么"
 - 这是模型本身的行为，**不是插件造成的延迟**
 
@@ -166,11 +166,20 @@ op_credit_summary: {
 
 - **仅支持国内版（`agent.minimax.cn`）**。国际版网关是否可用**未经验证**，请勿据此推断其他区域可用。
 - **必须开启推理**。MiniMax 的全部模型都声明需要推理，关不掉。首字延迟因此高于非推理模型。
-- **未登录时模型列表是内置兜底**。此时选择器中仍会显示 `M2.7`、`M3` 两个内置条目，但它们无法真正调用；登录后才会切换为上游实时目录。判断是否可用，请以实际调用结果为准。
+- **未登录时模型列表是内置兜底**。此时选择器中仍会显示 `M3`、`M3.1-Flash` 两个内置条目，但它们无法真正调用；登录后才会切换为上游实时目录。判断是否可用，请以实际调用结果为准。
 - **不提供余额/用量显示**。这一项经过实测后确认无法实现，原因记录在下方「为什么没有额度显示」中。
 - **不自动续期令牌**，请参照上方「令牌有效期」。
 - **不提供设置界面卡片**。本插件为纯宿主侧插件，不在 DSH 设置页注册任何卡片，因此不会参与浏览器端的启动流程（这同时也是它不会导致 DSH 启动失败的原因）。
 - **上游接口非公开**，MiniMax 客户端更新后可能失效。
+
+## 更新记录
+
+### 0.2.3（2026-10-19）
+
+- **同步上游模型变动**：MiniMax 下架了 `M2.7`、`M2.7-highspeed` 两个旧模型；此前以匿名形式灰度的测试模型（代号 "space bunny" / 太空兔）正式发布为 **`M3.1-Flash`**。当前上游实时目录为 `M3`、`M3.1-Flash`。
+- 内置兜底列表与文档随之更新。**已登录用户无需更新插件**即可看到模型变动（列表来自上游实时目录），本次发布只是让未登录兜底、测试与文档与上游保持一致。
+
+历史版本见 [GitHub Releases](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/releases) 与 [npm 版本列表](https://www.npmjs.com/package/dsh-connect-minimaxcode?activeTab=versions)。
 
 ## 卸载
 

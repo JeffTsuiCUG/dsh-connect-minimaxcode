@@ -140,7 +140,10 @@ declare const MINIMAXCODE_PROVIDER_ID = "minimaxcode";
  * models the desktop app is known to ship.
  *
  * Deliberately small and conservative: a fallback entry overstates nothing we
- * could not confirm.
+ * could not confirm. Last verified against the live catalog on 2026-10-19,
+ * when upstream retired `MiniMax-M2.7` and `MiniMax-M2.7-highspeed` and
+ * promoted the model previously served anonymously (internally "space bunny")
+ * as `MiniMax-M3.1-Flash`.
  */
 declare const FALLBACK_MODELS: readonly CatalogModel[];
 /** Where the currently served list came from. */

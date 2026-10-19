@@ -39,22 +39,25 @@ export const MINIMAXCODE_PROVIDER_ID = 'minimaxcode'
  * models the desktop app is known to ship.
  *
  * Deliberately small and conservative: a fallback entry overstates nothing we
- * could not confirm.
+ * could not confirm. Last verified against the live catalog on 2026-10-19,
+ * when upstream retired `MiniMax-M2.7` and `MiniMax-M2.7-highspeed` and
+ * promoted the model previously served anonymously (internally "space bunny")
+ * as `MiniMax-M3.1-Flash`.
  */
 export const FALLBACK_MODELS: readonly CatalogModel[] = [
   {
-    id: 'MiniMax-M2.7',
-    name: 'M2.7',
-    contextWindow: 200000,
+    id: 'MiniMax-M3',
+    name: 'M3',
+    contextWindow: 512000,
     maxOutputTokens: 128000,
     toolCall: true,
     reasoning: true,
-    inputModalities: ['text'],
-    attachment: false,
+    inputModalities: ['text', 'image', 'video'],
+    attachment: true,
   },
   {
-    id: 'MiniMax-M3',
-    name: 'M3',
+    id: 'MiniMax-M3.1-Flash',
+    name: 'M3.1-Flash',
     contextWindow: 512000,
     maxOutputTokens: 128000,
     toolCall: true,
