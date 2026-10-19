@@ -7,7 +7,7 @@
 - **正式提交**：PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110) —— `data/plugins/JeffTsuiCUG__dsh-connect-minimaxcode.yml`
 - **CI**：`check` 与 `Submission gate` 均已通过 ✅
 - **合并**：等待维护者 review 合并（对方仓库，需等）
-- **截图**：声明在**本项目自己仓库**的 [`screenshots.json`](../screenshots.json)（若已提供），未修改注册表 `data/screenshots.json`（该文件是旧约定回退，禁止再加新键）
+- **截图**：市场截图按当前约定由**本项目自己仓库根目录的** `screenshots.json` 声明（内容是图片相对路径的数组）；本项目目前尚未提供截图，因此还没有这个文件。**未修改**注册表 `data/screenshots.json`（该文件是旧约定回退，禁止再加新键）
 
 ## 收录目录规范（依据 [contributing.md](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md)）
 

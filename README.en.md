@@ -3,8 +3,7 @@
 Bring the models of the **MiniMax Code desktop app (China region)**, already signed in on this machine, into **DeepSeek Harness (DSH)**. Install it and it works — there is no API key to configure.
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![version](https://img.shields.io/badge/version-0.2.3-cornflowerblue.svg)
-[![npm](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
+[![version](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
 [![CI](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml)
 
 [简体中文](README.md) | English
@@ -247,9 +246,21 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.4.2 (2026-10-19)
+
+- **Discoverability**: the npm description is now bilingual, the keywords were completed (`dsh`, `credits`, `usage`, …), and the repository description and topics were updated to match.
+- Added [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/) to the repository: the market entry draft and the rules it has to follow.
+- Added an English README ([README.en.md](README.en.md)).
+
+### 0.4.1 (2026-10-19)
+
+- **Fixed the ledger paging parameter**: the endpoint **accepts** `page` and then **ignores** it; the parameter it actually reads is `page_number`. An account with more than a hundred lots used to collect the same page over and over.
+- **Corrected the expiry rule**: "29 days after the grant" was an artifact of reading a UTC grant time against a UTC expiry time. The real rule is **thirty calendar days after the day it was granted** (at midnight in the account's own timezone). Some lots run a full year, so the expiry is always read from the response's `expire_at_ms`.
+- Two statements were corrected as well: expiry does **not** zero a lot's `remaining_amount` (it can leave a small negative residue) — it excludes the expired lot from the balance instead; and the ledger total equals the balance digit for digit while the account is idle, so a difference between two samples is real consumption in between.
+
 ### 0.4.0 (2026-10-19)
 
-- **Added "credits about to expire"**: credits are granted one lot at a time and each lot expires on its own (about 29 days after it was granted). The plugin reads the credit ledger `GET /minimax-cloud/api/v1/credit/details` and shows, in the **plugin page** and in the pill, the credits expiring within 7 days and within 30 days, the expiry date of the most recent lot, and a list of expiring lots.
+- **Added "credits about to expire"**: credits are granted one lot at a time and each lot expires on its own (thirty calendar days after the day it was granted). The plugin reads the credit ledger `GET /minimax-cloud/api/v1/credit/details` and shows, in the **plugin page** and in the pill, the credits expiring within 7 days and within 30 days, the nearest expiry date, and a list of expiring lots.
 - **Only lots that still have a balance are counted**, so that lots which are "used up but about to expire" are not counted as a loss.
 - **Plugin page card**: a new card under "Settings → Plugins → DSH Connect MiniMax Code" (balance, granted/purchased split, expiry distribution, expiring lots, consumption on this machine and equivalent cost); the list itself shows a one-line summary.
 - **The pill and the card share one state store and one poller**, so multiple interfaces do not request the account API repeatedly.
@@ -273,7 +284,7 @@ For earlier versions, see [GitHub Releases](https://github.com/JeffTsuiCUG/dsh-c
 
 The plugin ships an installable `dsh.bundle` manifest and is published to npm. The directory of the community plugin marketplace (`dshmarket`) is generated from the [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) registry, and this plugin's listing has been submitted as PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110). A draft and the operating notes are kept in the repository: [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/).
 
-Marketplace screenshots are declared, per the current convention, by the **`screenshots.json` in the plugin's own repository root** (the registry's `data/screenshots.json` is a fallback from the old convention, and no new keys are added there).
+Marketplace screenshots are declared, per the current convention, by the **`screenshots.json` in the plugin's own repository root** (the registry's `data/screenshots.json` is a fallback from the old convention, and no new keys are added there). This repository **does not ship screenshots yet**, so the file does not exist; once there are some, put `screenshots.json` in the repository root (an array of relative image paths) and the marketplace card will pick them up.
 
 > The UI pill sits in the **dock below the input box** rather than in the input box toolbar: the toolbar is a **shared slot** where the shell's own controls and other plugins all register, and there is no way to guarantee that every occupant is visible — a sibling plugin once lost a reading for exactly that reason.
 

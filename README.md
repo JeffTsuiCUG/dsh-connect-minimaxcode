@@ -3,8 +3,7 @@
 把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-![version](https://img.shields.io/badge/version-0.2.3-cornflowerblue.svg)
-[![npm](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
+[![version](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
 [![CI](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml)
 
 [English](README.en.md) | 简体中文
@@ -247,9 +246,21 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
+### 0.4.2（2026-10-19）
+
+- **可发现性**：npm 描述改为中英双语，关键词补齐（`dsh`、`credits`、`usage` 等）；GitHub 仓库描述与 topics 同步更新。
+- 仓库内新增 [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)：市场收录条目草稿与提交规范。
+- 新增[英文版 README](README.en.md)。
+
+### 0.4.1（2026-10-19）
+
+- **修正台账翻页参数**：接口会**接受** `page` 然后**忽略**它，真正生效的是 `page_number`。批次超过 100 笔的账号原本会反复收集同一页。
+- **更正到期规则表述**：「发放后 29 天」是拿 UTC 发放时刻对 UTC 到期时刻的混算假象，真实规则是**发放日 + 30 个自然日**（按账户时区当日 00:00 失效）。另存在 365 天制式批次，所以到期日一律读接口的 `expire_at_ms`。
+- 更正两处表述：过期**不清零**批次的 `remaining_amount`（可能有负值残留），而是把过期批次**排除在余额之外**；台账合计与余额在静止期逐位相等，采样间隔里的差额是期间真实消耗。
+
 ### 0.4.0（2026-10-19）
 
-- **新增「积分即将过期」**：积分是按笔发放、每批独立到期的（发放后约 29 天）。插件读取积分台账 `GET /minimax-cloud/api/v1/credit/details`，在**插件页面**与胶囊里显示 7 天内到期、30 天内到期、最近一笔到期日与到期批次清单。
+- **新增「积分即将过期」**：积分是按笔发放、每批独立到期的（发放日 + 30 个自然日）。插件读取积分台账 `GET /minimax-cloud/api/v1/credit/details`，在**插件页面**与胶囊里显示 7 天内到期、30 天内到期、最近到期日与到期批次清单。
 - **只统计仍有余额的批次**，避免把「已用光但快到期」的批次算成损失。
 - **插件页面卡片**：在「设置 → 插件 → DSH Connect MiniMax Code」新增一张卡片（余额、赠送/购买拆分、到期分布、到期批次、本机消耗与等效金额），列表里则显示一行摘要。
 - 胶囊与卡片共用一个状态存储与同一个轮询器，多个界面不会重复请求账户接口。
@@ -273,7 +284,7 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 插件已包含可安装的 `dsh.bundle` manifest，并发布到 npm。社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的收录条目已提交为 PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110)，仓库内保留了一份草稿与操作说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)。
 
-市场截图按当前约定由**插件自己仓库根目录的** `screenshots.json` 声明（注册表 `data/screenshots.json` 是旧约定下的回退，不再新增键）。
+市场截图按当前约定由**插件自己仓库根目录的** `screenshots.json` 声明（注册表 `data/screenshots.json` 是旧约定下的回退，不再新增键）。本仓库目前**尚未提供截图**，所以还没有这个文件；补上截图后，在根目录放 `screenshots.json`（内容是图片相对路径的数组）即可被市场卡片取用。
 
 > 界面胶囊放在**输入框下方的 dock**，而不是输入框工具栏：工具栏是**共享插槽**，外壳自己的控件和别的插件都注册在那里，无法保证每个占用者都可见——同族插件就因为这个原因丢过一次读数。
 
