@@ -119,7 +119,7 @@ export {
   readCredential,
 } from './auth.ts'
 export type { AuthState, Credential, MinimaxRegion, TokenClaims } from './auth.ts'
-export { MINIMAX_STATUS_PATH, statusDocument } from './status-route.ts'
+export { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, statusDocument } from './status-route.ts'
 export type { StatusDocument } from './status-route.ts'
 export { MINIMAX_STREAM_IDLE_TIMEOUT_MS, createMinimaxCodeAdapter } from './adapter.ts'
 
