@@ -67,13 +67,19 @@ dsh plugin --profile desktop add github:JeffTsuiCUG/dsh-connect-minimaxcode
 dsh plugin --profile desktop add dsh-connect-minimaxcode
 ```
 
+> **想立刻用上积分余额与到期提示**，请锁版本安装 —— pnpm 11 默认 `minimumReleaseAge` 为 1440 分钟，新版本发布后 24 小时内不带版本号的安装会解析到**较早的版本**（当前会落到 0.2.x，而积分功能是 0.3.0 才有的）：
+>
+> ```bash
+> dsh plugin --profile desktop add dsh-connect-minimaxcode@0.4.2
+> ```
+
 Web profile 把 `--profile desktop` 换成 `--profile web`。
 
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
-安装后**无需重启**，插件会热加载；模型随后出现在模型选择器的 **MiniMax Code** 分组中。
+安装后插件会热加载，模型随后出现在模型选择器的 **MiniMax Code** 分组中。
 
-> 界面胶囊（积分余额）属于浏览器侧插件，**首次安装或升级到 0.3.0 后需要重启一次 DSH** 才会出现在输入框下方。
+> 积分胶囊与插件页面卡片属于浏览器侧插件，**首次安装、或升级到 0.3.0 及之后的版本后，需要重启一次 DSH** 才会出现（模型通路本身不需要重启）。
 
 ### 若安装被 `allowBuilds` 拦截
 

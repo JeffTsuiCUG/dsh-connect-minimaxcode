@@ -71,9 +71,9 @@ For the Web profile, replace `--profile desktop` with `--profile web`.
 
 > The desktop profile is owned exclusively by the Electron app. If the `dsh` command is not on your PATH, use the carrier CLI bundled with the DSH app (the path depends on the install location, for example `<DSH install dir>\resources\runtime\cli\bin\dsh.cmd`).
 
-After installing, **no restart is needed** — the plugin hot-reloads, and the models then show up under the **MiniMax Code** group in the model picker.
+After installing, the plugin hot-reloads, and the models then show up under the **MiniMax Code** group in the model picker.
 
-> The UI pill (credit balance) is a browser-side plugin, so **the first install, or an upgrade to 0.3.0, requires one DSH restart** before it appears under the input box.
+> The credit pill and the plugin page card are browser-side plugins, so **the first install, or an upgrade to 0.3.0 or later, requires one DSH restart** before they appear (the model route itself does not need a restart).
 
 ### If the install is blocked by `allowBuilds`
 
