@@ -4,8 +4,9 @@
  * A client bundle that throws during activation takes the whole web app down
  * with it, so the contract is pinned here rather than discovered in the app:
  * the artifact is a classic script, it registers itself with the host's
- * module loader under the package name, and the plugin it returns registers
- * exactly one slot in the composer's dock.
+ * module loader under the package name, the readout sits in the composer's
+ * tool row beside the model picker, and it is only drawn — and only polled —
+ * while this plugin's own provider is the one selected.
  */
 
 import { readFileSync } from 'node:fs'
@@ -79,18 +80,42 @@ function reactHarness() {
   }
 }
 
+/**
+ * Render a registered component through the gate that may wrap it.
+ *
+ * The gate returns the pill as its own element so the pill's hooks can come
+ * and go with the selection; unwrapping one level reaches what a person sees.
+ */
+function renderDeep(
+  harness: ReturnType<typeof reactHarness>,
+  component: (props: unknown) => unknown,
+  props: unknown,
+): unknown {
+  const first = harness.render(component, props)
+  if (typeof first === 'object' && first !== null && typeof (first as { type?: unknown }).type === 'function') {
+    const element = first as { type: (childProps: unknown) => unknown; props: unknown }
+    return harness.render(element.type, element.props)
+  }
+  return first
+}
+
 interface Loaded {
   registrations: { id: string; factory(require: (id: string) => unknown): { inject: string[]; apply(ctx: unknown): void } }[]
   slotNames: string[]
   slots: { options: { name: string; id?: string; key?: string; order?: number }; component: (props: unknown) => unknown }[]
+  /** How many times the sandboxed status route has been fetched. */
+  fetchCount: number
 }
 
 /** Load the built artifact the way the host's loader does. */
 function loadClient(): Loaded {
   const source = readFileSync(CLIENT_PATH, 'utf8')
-  const loaded: Loaded = { registrations: [], slotNames: [], slots: [] }
+  const loaded: Loaded = { registrations: [], slotNames: [], slots: [], fetchCount: 0 }
   const sandbox: Record<string, unknown> = {
-    fetch: async () => ({ ok: true, json: async () => STATUS }),
+    fetch: async () => {
+      loaded.fetchCount += 1
+      return { ok: true, json: async () => STATUS }
+    },
     setInterval: () => 0,
     clearInterval: () => {},
   }
@@ -127,7 +152,7 @@ describe('client bundle', () => {
     expect(plugin.inject).toContain('locale')
   })
 
-  it('registers one slot in the composer dock and nothing else', () => {
+  it('registers the readout in the composer tool row and nothing else', () => {
     const loaded = loadClient()
     const plugin = loaded.registrations[0]!.factory(() => reactHarness().react)
     plugin.apply({
@@ -147,10 +172,13 @@ describe('client bundle', () => {
       },
       effect: (effect: () => unknown) => effect(),
     })
-    expect(loaded.slotNames).toEqual(['conversation.composer.dock', 'plugins.bundle.config'])
+    // The tool row, not the ambient strip below the composer: the balance
+    // belongs beside the model picker that decides whose balance it is.
+    expect(loaded.slotNames).toEqual(['conversation.input.left', 'plugins.bundle.config'])
     expect(loaded.slots).toHaveLength(2)
-    expect(loaded.slots[0]?.options.name).toBe('conversation.composer.dock')
+    expect(loaded.slots[0]?.options.name).toBe('conversation.input.left')
     expect(loaded.slots[0]?.options.id).toBe('minimax-credits')
+    expect(loaded.slots[0]?.options.order).toBe(4)
     // The page card is keyed by the package name, which is how the plugins
     // page finds the entry that belongs to this bundle.
     expect(loaded.slots[1]?.options.name).toBe('plugins.bundle.config')
@@ -193,8 +221,9 @@ describe('client bundle', () => {
     plugin.apply({
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
-        register: (_options: unknown, rendered: (props: unknown) => unknown) => {
-          component = rendered
+        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
+          // The tool-row readout, not the page card registered after it.
+          if (options?.name === 'conversation.input.left') component = rendered
           return () => {}
         },
       },
@@ -204,14 +233,82 @@ describe('client bundle', () => {
     const props = { t: (key: string, params?: Record<string, unknown>) => `${key}:${JSON.stringify(params ?? {})}` }
 
     // The first render has no data yet: the pill says so rather than lying.
-    const first = JSON.stringify(harness.render(component!, props))
+    const first = JSON.stringify(renderDeep(harness, component!, props))
     expect(first).toContain('unavailable')
 
     // Once the status route answered, the balance is shown.
     await new Promise(resolve => setTimeout(resolve, 10))
-    const second = JSON.stringify(harness.render(component!, props))
+    const second = JSON.stringify(renderDeep(harness, component!, props))
     expect(second).toContain('balance')
     // The amount is grouped for the reader, so the digits are matched loosely.
     expect(second).toMatch(/11[,.]?326[.,]88/)
+  })
+
+  /** The registered readout component (the tool-row seat), bound to the test's harness. */
+  function registeredComponent(loaded: Loaded, harness: ReturnType<typeof reactHarness>): (props: unknown) => unknown {
+    // The same harness instance the test renders with: the component's hooks
+    // must share the state the assertions read.
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    let component: ((props: unknown) => unknown) | undefined
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        // Two slots register; the readout is the one in the tool row.
+        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.name === 'conversation.input.left') component = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    if (component === undefined) throw new Error('no readout component registered')
+    return component
+  }
+
+  it('hides the readout and stops polling while another provider is selected', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const component = registeredComponent(loaded, harness)
+
+    const projection = { next: { provider: 'workbuddy' }, lastUsed: { provider: 'minimaxcode' } }
+    const tree = harness.render(component, { useProjection: () => projection })
+    // Nothing at all: another connector's balance would be the wrong number.
+    expect(tree).toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 15))
+    // And because nothing rendered, the shared store never subscribed.
+    expect(loaded.fetchCount).toBe(0)
+  })
+
+  it('draws the readout when a MiniMax model is the one selected', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const component = registeredComponent(loaded, harness)
+    const props = { t: (key: string, params?: Record<string, unknown>) => `${key}:${JSON.stringify(params ?? {})}` }
+
+    // `next` is what the picker wrote for the next request; `lastUsed` is
+    // what the previous request used. Either naming MiniMax counts.
+    for (const projection of [
+      { next: { provider: 'minimaxcode' }, lastUsed: { provider: 'workbuddy' } },
+      { lastUsed: { provider: 'minimaxcode' } },
+      {},
+    ]) {
+      const withProjection = { ...props, useProjection: () => projection }
+      const first = renderDeep(harness, component, withProjection)
+      expect(first).not.toBeNull()
+      await new Promise(resolve => setTimeout(resolve, 10))
+      const second = JSON.stringify(renderDeep(harness, component, withProjection))
+      expect(second).toContain('balance')
+    }
+    expect(loaded.fetchCount).toBeGreaterThan(0)
+  })
+
+  it('keeps the readout when the host offers no projection at all', () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const component = registeredComponent(loaded, harness)
+    // An older host, or a slot the host forgot to hand the hook to: the
+    // balance is still true, so it is still shown.
+    expect(harness.render(component, {})).not.toBeNull()
   })
 })

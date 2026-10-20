@@ -42,13 +42,13 @@ Another implementation in the same direction is **[dingminhua/dsh-connect-workbu
 
 - **Zero configuration**: the login state of the MiniMax Code desktop app is read automatically, and no plaintext token is ever stored in DSH
 - **Dynamic model catalog**: pulled live from the upstream API, so upstream adding or removing models needs no plugin update
-- **Credit balance at a glance**: the pill under the input box shows the remaining MiniMax Code credits and the consumption accumulated on this machine
+- **Credit balance at a glance**: the pill in the composer tool row (beside the model picker) shows the remaining MiniMax Code credits and the consumption accumulated on this machine
 - **Live usage accounting**: the token usage of every request is taken from the upstream response itself, and can be converted to an equivalent cost using the official price list
 - **Reuses the official adapter**: upstream speaks the standard Anthropic Messages protocol, so DSH's built-in provider is reused as is; tool calls, reasoning blocks and context compaction are all handled by DSH
 - **Works without the desktop app**: the plugin can sign in on its own with the OAuth device code flow; you confirm in your own browser and the plugin never sees a password
 - **Daily check-in**: MiniMax Code grants credits every day and the desktop app does **not** claim them for you; the plugin shows the seven-day cycle and can claim the day's grant
 - **Read-mostly**: apart from "refreshing an expired desktop app login state" and the sign-in you start yourself, the plugin does not write to or modify any MiniMax file
-- **Non-intrusive UI**: the pill takes a single row in the dock under the input box, and changes nothing else in the DSH interface
+- **Follows the selected model**: the balance sits in the **composer tool row beside the model picker**, and is drawn **only while a MiniMax model is selected** — picking another connector's model hides it entirely instead of misleading you with MiniMax's balance
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Either:
 1. **The MiniMax Code desktop app (China region) installed and signed in** — the plugin reuses its sign-in (the easy way)
 2. **Nothing installed** — press "Sign in to MiniMax Code" on the plugin page; the plugin starts an OAuth device code flow and you confirm with your own MiniMax account in a browser (this needs `account.minimax.cn` to be reachable)
 
-Plus DSH desktop (built-in core in the `0.2.0` series) or the Web profile.
+Plus DSH desktop (built-in core `>=0.2.1-rc.2 <0.3.0`, see `engines.dsh` in `package.json`; tested on `0.2.1-rc.2`) or the Web profile.
 
 ## Installation
 
@@ -200,7 +200,7 @@ The automatic claim is deliberately restrained: it only asks when the upstream s
 
 ## Credit balance and usage
 
-The pill under the composer input box shows the **remaining MiniMax Code credits**; expanding it also shows the granted/purchased split, the consumption between the two reads, and the tokens and equivalent cost accumulated on this machine.
+The pill in the composer tool row (beside the model picker) shows the **remaining MiniMax Code credits**; expanding it also shows the granted/purchased split, the consumption between the two reads, and the tokens and equivalent cost accumulated on this machine. The pill appears **only while a `minimaxcode` model is selected**.
 
 ### Where the balance comes from
 
@@ -243,7 +243,7 @@ GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page_number=1&p
 
 Measured on this machine, 23 lots: the one granted on 09-20 expires on 10-20, the one granted on 09-21 expires on 10-21, and so on; one granted on 08-25 expires on 2027-08-25 (a one-year lot; `credit_type` 1 = purchased / 2 = check-in). **Always read the expiry date from `expire_at_ms`** instead of hardcoding a number of days — there are at least a 30-day and a 365-day scheme.
 
-Based on that, the plugin shows, in the **plugin page** (Settings → Plugins → DSH Connect MiniMax Code) and in the pill under the input box:
+Based on that, the plugin shows, in the **plugin page** (Settings → Plugins → DSH Connect MiniMax Code) and in the pill in the composer tool row:
 
 - The remaining credits **expiring within 7 days**, and the expiry date of the most recent lot
 - The remaining credits **expiring within 30 days**
@@ -290,11 +290,16 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **When the OAuth token expires the credit pill is temporarily unavailable**. With the desktop app's sign-in, open MiniMax Code once and let it refresh itself; with the plugin's own sign-in, the plugin renews it with its refresh token (the server rotates the refresh token, and the plugin writes the new pair back to its own file). This does not affect model traffic.
 - **The check-in needs an account that is entitled to it.** The check-in is an upstream entitlement; the plugin only presses the button for you. When the server says "not claimable now", the plugin says so — it does not retry or work around it.
 - **The automatic claim is off by default**, and it only asks when the server explicitly says the day can be claimed, at most once a day. Whether to turn it on, and whether that is within MiniMax's terms of service, is your call.
-- **No settings card is provided**. The plugin does not register a card on the DSH settings page; the interface it adds is a single pill under the input box and a small card on the plugin page.
+- **No settings card is provided**. The plugin does not register a card on the DSH settings page; the interface it adds is a single pill in the composer tool row (**drawn only while this plugin's model is selected**) and a small card on the plugin page.
 - **The upstream APIs are non-public** and may stop working when MiniMax updates its client. If the balance API breaks, the pill shows "credits unavailable", which does not affect model traffic.
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.1 (2026-10-20)
+
+- **The balance follows the selected model**: moved from the dock below the input box to the **composer tool row beside the model picker**, gated by the host's `modelSelection` projection — the readout is drawn **only while a `minimaxcode` model is selected**, and selecting another connector's model (workbuddy, for instance) hides it entirely, polling included (following `dsh-connect-trae`).
+- **`engines.dsh` narrowed to `>=0.2.1-rc.2 <0.3.0-0`**: only the tier actually tested is claimed; the previous `>=0.1.7-rc.1` reached too far.
 
 ### 0.5.0 (2026-10-20)
 
@@ -343,7 +348,9 @@ The plugin ships an installable `dsh.bundle` manifest and is published to npm. T
 
 Marketplace screenshots are declared, per the current convention, by the **`screenshots.json` in the plugin's own repository root** (the registry's `data/screenshots.json` is a fallback from the old convention, and no new keys are added there). This repository **does not ship screenshots yet**, so the file does not exist; once there are some, put `screenshots.json` in the repository root (an array of relative image paths) and the marketplace card will pick them up.
 
-> The UI pill sits in the **dock below the input box** rather than in the input box toolbar: the toolbar is a **shared slot** where the shell's own controls and other plugins all register, and there is no way to guarantee that every occupant is visible — a sibling plugin once lost a reading for exactly that reason.
+> **Since 0.5.1 the readout lives in the composer tool row (beside the model picker) and is gated by the host's `modelSelection` projection**: the balance belongs to the provider the next request will actually use, so it sits where that selection is made — and it hides entirely, polling included, when another connector's model (workbuddy, for example) is selected. This follows `dsh-connect-trae`, whose `ComposerPointsGate` returns null for every provider but its own.
+>
+> The tool row is a shared slot and can in principle be crowded out (a sibling plugin lost a reading this way in `workbuddy` issue #62; trae's answer is a second seat). **This plugin registers the tool-row seat only**; the ambient dock is a proven fallback should crowding ever occur.
 
 ## Uninstall
 

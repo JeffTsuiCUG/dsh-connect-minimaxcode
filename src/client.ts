@@ -18,10 +18,25 @@ interface ModuleLoader {
   load(config: { id: string; factory(require: (id: string) => unknown): unknown }): void
 }
 
+/** What the host's model-selection projection reports. */
+interface ModelSelection {
+  /** The selection the next request will use, when the picker has written one. */
+  next?: { provider?: string }
+  /** The selection the previous request used, before `next` was written. */
+  lastUsed?: { provider?: string }
+}
+
 /** The props the host's slots hand to a registered component. */
 interface SlotProps {
   t?: (key: string, params?: Record<string, unknown>) => string
   view?: 'summary' | 'page'
+  /**
+   * The host's projection reader, handed to tool-row entries.
+   *
+   * Absent on hosts that do not offer it; the pill is then kept rather than
+   * hidden, so an older host still shows its balance.
+   */
+  useProjection?: (name: string) => ModelSelection | undefined
 }
 
 /** The shape this half needs from the host's slot registry. */
@@ -98,6 +113,13 @@ interface StatusDocument {
   const STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
   const ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
   const POLL_INTERVAL_MS = 20_000
+  /**
+   * The provider id the host side registers with `llm.registerAdapter`.
+   *
+   * Duplicated here on purpose: this half is a classic script that cannot
+   * import the host's module, and the id is the one the projection reports.
+   */
+  const MINIMAX_PROVIDER_ID = 'minimaxcode'
 
   const zh: Record<string, string> = {
     title: 'MiniMax Code 积分',
@@ -292,7 +314,7 @@ interface StatusDocument {
         )
       }
 
-      /** The pill in the composer's dock. */
+      /** The pill itself; the gate decides whether it is drawn at all. */
       function CreditPill(props: SlotProps) {
         const [status] = useStatus()
         const [open, setOpen] = React.useState(false)
@@ -336,6 +358,27 @@ interface StatusDocument {
           }, label),
           open ? detail : null,
         )
+      }
+
+      /**
+       * The pill, only while this plugin's own provider is selected.
+       *
+       * The balance belongs to the provider the next request will actually
+       * use, so another connector's model means this balance is the wrong
+       * number to show: the gate hides the readout and — because the pill is
+       * the only subscriber — the polling stops with it. The projection comes
+       * from the host's own `modelSelection`, which is what the model picker
+       * writes, so the readout cannot disagree with the model in effect.
+       *
+       * A host without the projection, or a session where the picker has not
+       * chosen yet, keeps the pill: "I do not know" must not hide a balance
+       * that is true either way.
+       */
+      function CreditPillGate(props: SlotProps) {
+        const projection = props.useProjection?.('modelSelection')
+        const provider = (projection?.next ?? projection?.lastUsed)?.provider
+        if (provider !== undefined && provider !== MINIMAX_PROVIDER_ID) return null
+        return h(CreditPill, props)
       }
 
       /** Ask the host to do something, and let the card read the result. */
@@ -629,14 +672,17 @@ interface StatusDocument {
           const context = ctx as SlotContext
           // Visible text goes through the host's locale service.
           context.effect(() => context.locale.register(NAMESPACE, { zh, en }), `${BUNDLE_NAME}: locale`)
-          // The composer dock is the strip under the input box, which is where
-          // the host itself renders its activity and usage pills.
-          context.slots.inject('conversation.composer.dock', () => context.slots.register({
-            name: 'conversation.composer.dock',
+          // The tool row to the left of the composer — beside the model
+          // picker — rather than the ambient strip below it: the balance
+          // belongs to the provider that is selected, so it sits where that
+          // selection is made, and the gate hides it when another connector's
+          // model is in effect.
+          context.slots.inject('conversation.input.left', () => context.slots.register({
+            name: 'conversation.input.left',
             id: 'minimax-credits',
-            order: 2,
+            order: 4,
             locale: NAMESPACE,
-          }, CreditPill))
+          }, CreditPillGate))
           // The plugin's own page, keyed by the package name, where the
           // balance and the expiry schedule are spelled out.
           context.slots.inject('plugins.bundle.config', () => context.slots.register({
