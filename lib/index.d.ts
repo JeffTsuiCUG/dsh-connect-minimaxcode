@@ -475,9 +475,304 @@ declare class UsageMeter {
   reset(): void;
 }
 //#endregion
+//#region src/credentials.d.ts
+/** The file the plugin's own credential lives in. */
+declare const PLUGIN_CREDENTIAL_FILENAME = ".minimaxcode-auth.json";
+/** The file the plugin's own settings and session live in. */
+declare const PLUGIN_STATE_FILENAME = ".minimaxcode-state.json";
+/** The credential the plugin obtained for itself. */
+interface PluginCredential {
+  /** The document's shape. */
+  schemaVersion: number;
+  /** The OAuth client the token was issued to. */
+  clientId: string;
+  /** The scopes the token carries. */
+  scopes: string[];
+  /** The audience the token was issued for. */
+  audience: string;
+  /** The `mmoat_` bearer token. */
+  accessToken: string;
+  /** The refresh token, when the server issued one. */
+  refreshToken?: string;
+  /** Expiry in milliseconds since the epoch. */
+  expiresAtMs?: number;
+  /** When the token was obtained, in milliseconds since the epoch. */
+  obtainedAtMs?: number;
+}
+/** A device login waiting for the person to authorize it. */
+interface DeviceLoginSession {
+  /** The device code the token endpoint is polled with. */
+  deviceCode: string;
+  /** The PKCE verifier that goes with the device code. */
+  codeVerifier: string;
+  /** The code the person types on the account page. */
+  userCode: string;
+  /** Where to authorize. */
+  verificationUri: string;
+  /** Where to authorize, with the code filled in. */
+  verificationUriComplete: string;
+  /** When the device code stops working, in milliseconds since the epoch. */
+  expiresAtMs: number;
+}
+/** The plugin's own settings. */
+interface PluginState {
+  /** The document's shape. */
+  schemaVersion: number;
+  /** Whether the plugin claims the daily grant on its own. */
+  autoCheckin: boolean;
+  /** The day the last claim happened, in the account's time zone. */
+  lastClaimDay?: string;
+  /** When the last claim happened, in milliseconds since the epoch. */
+  lastClaimAtMs?: number;
+  /** The points the last claim granted. */
+  lastClaimPoints?: number;
+  /** A device login waiting to be authorized. */
+  deviceLogin?: DeviceLoginSession;
+}
+/**
+ * The Harness home.
+ *
+ * The host resolves it the same way: the `DSH_HOME` environment variable when
+ * it is set, otherwise `~/.dsh`. The plugin resolves it on its own rather
+ * than importing the host's helper, so it also works in a plain command line
+ * where the host's packages are not installed.
+ */
+declare function dshHome(env?: NodeJS.ProcessEnv): string;
+/** Where the plugin's credential lives. */
+declare function pluginCredentialPath(env?: NodeJS.ProcessEnv): string;
+/** Where the plugin's state lives. */
+declare function pluginStatePath(env?: NodeJS.ProcessEnv): string;
+/** Read the plugin's own credential. */
+declare function readPluginCredential(env?: NodeJS.ProcessEnv): Promise<PluginCredential | undefined>;
+/** Write the plugin's own credential. */
+declare function writePluginCredential(credential: PluginCredential, env?: NodeJS.ProcessEnv): Promise<void>;
+/** Read the plugin's own state. */
+declare function readPluginState(env?: NodeJS.ProcessEnv): Promise<PluginState>;
+/** Write the plugin's own state. */
+declare function writePluginState(state: PluginState, env?: NodeJS.ProcessEnv): Promise<void>;
+//#endregion
+//#region src/login.d.ts
+/** The endpoint that issues device codes. */
+declare const DEVICE_CODE_PATH = "/oauth2/device/code";
+/** The device authorization grant type. */
+declare const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+/** How a device login is going. */
+type DeviceLoginState =
+/** The person has not authorized it yet. */
+{
+  state: 'pending';
+} |
+/** The authorization server asked the client to slow down. */
+{
+  state: 'slow-down';
+} |
+/** The device code expired before the person authorized it. */
+{
+  state: 'expired';
+  message?: string;
+} |
+/** The person declined. */
+{
+  state: 'denied';
+  message?: string;
+} |
+/** The grant arrived. */
+{
+  state: 'signed-in';
+  credential: PluginCredential;
+};
+/**
+ * Make a PKCE verifier and its S256 challenge.
+ *
+ * The verifier is 43 characters of base64url entropy, which is what RFC 7636
+ * asks for, and it never leaves this process.
+ */
+declare function makePkce(): {
+  verifier: string;
+  challenge: string;
+};
+/**
+ * Ask for a device code.
+ *
+ * @returns The session the person authorizes, or `undefined` when the server
+ *   would not issue one.
+ */
+declare function startDeviceLogin(region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<DeviceLoginSession | undefined>;
+/**
+ * Poll for the grant.
+ *
+ * The authorization server answers `400` while the person has not authorized
+ * yet, with `authorization_pending` in the body; that is a normal answer, not
+ * an error.
+ */
+declare function pollDeviceLogin(session: DeviceLoginSession, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<DeviceLoginState>;
+/**
+ * Exchange the stored refresh token for a fresh access token.
+ *
+ * The authorization server rotates the refresh token, so the new pair
+ * replaces the old one wherever it is kept.
+ */
+declare function refreshPluginCredential(credential: PluginCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<PluginCredential>;
+//#endregion
+//#region src/signin.d.ts
+/** The claim endpoint. */
+declare const SIGNIN_CLAIM_PATH = "/minimax-cloud/api/v1/signin/claim";
+/** The cycle endpoint, which reports the panel. */
+declare const SIGNIN_PANEL_PATH = "/minimax-cloud/api/v1/signin/status";
+/** Per-day status, as the desktop app enumerates it. */
+declare const SIGNIN_DAY_STATUS: {
+  /** The day has not come yet. */
+  readonly upcoming: 1;
+  /** The day is today and can be claimed. */
+  readonly claimable: 2;
+  /** The day is claimed. */
+  readonly claimed: 3;
+  /** The day does not grant anything. */
+  readonly disabled: 4;
+};
+/** The status of one day in the cycle. */
+type SigninDayStatus = (typeof SIGNIN_DAY_STATUS)[keyof typeof SIGNIN_DAY_STATUS];
+/** How many days a cycle runs. */
+declare const SIGNIN_CYCLE_DAYS = 7;
+/** The outcome of a claim. */
+declare const SIGNIN_CLAIM_RESULT: {
+  /** The grant was credited. */
+  readonly credited: 1;
+  /** Today was already claimed; nothing was granted. */
+  readonly alreadyClaimed: 2;
+};
+/** The outcome of a claim. */
+type SigninClaimResult = (typeof SIGNIN_CLAIM_RESULT)[keyof typeof SIGNIN_CLAIM_RESULT];
+/** One day of the cycle. */
+interface SigninDay {
+  /** Which day of the cycle this is, 1 to 7. */
+  dayNo: number;
+  /** Points the day grants. */
+  points: number;
+  /** Extra points on top, when the day carries a bonus. */
+  bonusPoints: number;
+  /** The day's status. */
+  status: SigninDayStatus;
+  /** Whether this is today. */
+  isToday: boolean;
+}
+/** The cycle as the server reports it. */
+interface SigninPanel {
+  /** Which cycle the account is in. */
+  scene: number;
+  /** The days of the cycle. */
+  days: SigninDay[];
+}
+/** The result of claiming today's grant. */
+interface SigninClaim {
+  /** The server's identifier for the claim. */
+  claimId: string;
+  /** Whether the grant was credited or the day was already claimed. */
+  result: SigninClaimResult;
+  /** Which day of the cycle was claimed. */
+  dayNo: number;
+  /** Points granted. */
+  points: number;
+  /** Extra points granted. */
+  bonusPoints: number;
+  /** When the granted points expire, in milliseconds since the epoch. */
+  expireAtMs: number;
+  /** The cycle after the claim. */
+  panel?: SigninPanel;
+}
+/**
+ * The time zone the server should treat the request as coming from.
+ *
+ * The server wants an IANA name; an offset or a missing value is refused.
+ * The system's own name is the right answer, since "today" should be the
+ * user's today.
+ */
+declare function timezoneId(): string;
+/**
+ * Read the cycle out of a panel response.
+ *
+ * The server marks exactly one day as today and at most one day as claimable;
+ * a panel that says otherwise is not something to act on, so it is refused
+ * rather than half-believed.
+ */
+declare function parseSigninPanel(document: unknown): SigninPanel | undefined;
+/** Read the result of a claim. */
+declare function parseSigninClaim(document: unknown): SigninClaim | undefined;
+/**
+ * Read the cycle.
+ *
+ * @returns The panel, or `undefined` when the account cannot read it.
+ */
+declare function fetchSigninPanel(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, timezone?: string): Promise<SigninPanel | undefined>;
+/**
+ * Claim today's grant.
+ *
+ * This is the only request in the plugin that changes something upstream. It
+ * grants the day's points, which expire thirty days later.
+ *
+ * @returns What the server answered, or `undefined` when it refused.
+ */
+declare function claimSignin(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, timezone?: string): Promise<SigninClaim | undefined>;
+/** The day's key in the account's own time zone, `YYYY-MM-DD`. */
+declare function localDay(now?: number, timezone?: string): string;
+//#endregion
 //#region src/status-route.d.ts
 /** Route this plugin mounts, matching its settings card. */
 declare const MINIMAX_STATUS_PATH = "/plugins/dsh-connect-minimaxcode/status";
+/** The daily check-in, as the card reads it. */
+interface SigninStatus {
+  /** Whether the cycle could be read. */
+  state: 'ok' | 'unavailable';
+  /** Today's day in the cycle. */
+  today?: {
+    /** Which day of the cycle it is, 1 to 7. */
+    dayNo: number;
+    /** Points the day grants. */
+    points: number;
+    /** The day's status, as the upstream numbers it. */
+    status: number;
+    /** Whether the day can be claimed. */
+    claimable: boolean;
+    /** Whether the day is already claimed. */
+    claimed: boolean;
+  };
+  /** The days of the cycle. */
+  days?: {
+    dayNo: number;
+    points: number;
+    status: number;
+    isToday: boolean;
+  }[];
+  /** Points the whole cycle is worth. */
+  cyclePoints?: number;
+  /** Whether the plugin claims the day's grant on its own. */
+  autoCheckin: boolean;
+  /** The day the last claim happened. */
+  lastClaimDay?: string;
+  /** When the last claim happened, in milliseconds since the epoch. */
+  lastClaimAtMs?: number;
+  /** Points the last claim granted. */
+  lastClaimPoints?: number;
+  /** Whether the last claim was credited, or the day was already claimed. */
+  lastClaimResult?: number;
+  /** Why the cycle or the claim could not be read. */
+  error?: string;
+}
+/** How the plugin is signed in, as the card reads it. */
+interface LoginStatus {
+  /** Whether the plugin has a usable credential. */
+  state: 'signed-in' | 'signed-out' | 'pending';
+  /** Where the credential came from. */
+  source?: 'plugin' | 'desktop-app';
+  /** The code to type on the account page, while a sign-in is waiting. */
+  userCode?: string;
+  /** Where to authorize. */
+  verificationUri?: string;
+  /** Where to authorize, with the code filled in. */
+  verificationUriComplete?: string;
+  /** When the device code stops working, in milliseconds since the epoch. */
+  expiresAtMs?: number;
+}
 /** The account's credit balance, as the desktop app shows it. */
 interface CreditStatus {
   /** Whether the balance could be read. */
@@ -552,6 +847,10 @@ interface StatusDocument {
   credits?: CreditStatus;
   /** What this host's requests have used. */
   usage?: UsageStatus;
+  /** The daily check-in, when it could be read. */
+  signin?: SigninStatus;
+  /** How the plugin is signed in. */
+  login?: LoginStatus;
 }
 /** Inputs the document is derived from. */
 interface StatusDeps {
@@ -574,6 +873,10 @@ interface StatusDeps {
   credits?: CreditStatus;
   /** What this host's requests have used. */
   usage?: UsageStatus;
+  /** The daily check-in, when the account API could be reached. */
+  signin?: SigninStatus;
+  /** How the plugin is signed in. */
+  login?: LoginStatus;
 }
 /**
  * Build the card's status document.
@@ -646,4 +949,4 @@ declare const inject: string[];
  */
 declare function apply(ctx: Context): void;
 //#endregion
-export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, inject, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, priceFor, readCredential, readOAuthCredential, refreshOAuthCredential, statusDocument, writeOAuthCredential };
+export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PluginCredential, type PluginState, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };

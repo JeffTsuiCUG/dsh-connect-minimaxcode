@@ -70,12 +70,33 @@ interface StatusDocument {
     lastModel?: string
     requests: number
   }
+  signin?: {
+    state: 'ok' | 'unavailable'
+    today?: { dayNo: number; points: number; status: number; claimable: boolean; claimed: boolean }
+    days?: { dayNo: number; points: number; status: number; isToday: boolean }[]
+    cyclePoints?: number
+    autoCheckin: boolean
+    lastClaimDay?: string
+    lastClaimAtMs?: number
+    lastClaimPoints?: number
+    lastClaimResult?: number
+    error?: string
+  }
+  login?: {
+    state: 'signed-in' | 'signed-out' | 'pending'
+    source?: 'plugin' | 'desktop-app'
+    userCode?: string
+    verificationUri?: string
+    verificationUriComplete?: string
+    expiresAtMs?: number
+  }
 }
 
 ;(function bootstrapMinimaxCodeClient(): void {
   const BUNDLE_NAME = 'dsh-connect-minimaxcode'
   const NAMESPACE = 'dsh-connect-minimaxcode'
   const STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
+  const ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
   const POLL_INTERVAL_MS = 20_000
 
   const zh: Record<string, string> = {
@@ -98,6 +119,25 @@ interface StatusDocument {
     nextExpiry: '最近到期日',
     lots: '到期批次',
     noLots: '没有待到期的积分批次',
+    loginTitle: '登录',
+    loginPlugin: '已在插件内登录',
+    loginDesktop: '使用 MiniMax Code 桌面 App 的登录态',
+    loginSignedOut: '未登录',
+    loginPending: '等待你在浏览器里确认',
+    loginCode: '设备码',
+    loginOpen: '打开授权页面',
+    loginPolled: '我已授权，检查一下',
+    loginStart: '登录 MiniMax Code',
+    signinTitle: '每日签到',
+    signinToday: '第 {day} 天 · {points} 积分',
+    signinClaimed: '今日已签到',
+    signinClaimable: '今日可签到',
+    signinUnavailable: '签到信息不可用',
+    signinCycle: '一轮共 {points} 积分',
+    signinLast: '上次签到 {day}，{points} 积分',
+    signinAuto: '每天自动签到',
+    signinClaim: '签到',
+    claimableToday: '今日可签到',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -119,6 +159,25 @@ interface StatusDocument {
     nextExpiry: 'Next expiry',
     lots: 'Expiring grants',
     noLots: 'No grant is waiting to expire',
+    loginTitle: 'Sign-in',
+    loginPlugin: 'Signed in through the plugin',
+    loginDesktop: 'Using the MiniMax Code desktop app sign-in',
+    loginSignedOut: 'Not signed in',
+    loginPending: 'Waiting for you to confirm in the browser',
+    loginCode: 'Device code',
+    loginOpen: 'Open the authorization page',
+    loginPolled: 'I authorized it — check',
+    loginStart: 'Sign in to MiniMax Code',
+    signinTitle: 'Daily check-in',
+    signinToday: 'Day {day} · {points} credits',
+    signinClaimed: 'Claimed today',
+    signinClaimable: 'Claimable today',
+    signinUnavailable: 'Check-in information unavailable',
+    signinCycle: '{points} credits per cycle',
+    signinLast: 'Last claim on {day}, {points} credits',
+    signinAuto: 'Claim daily on its own',
+    signinClaim: 'Claim',
+    claimableToday: 'Claimable today',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -202,10 +261,10 @@ interface StatusDocument {
       }
 
       /** Read the shared status into a component's state. */
-      function useStatus(): StatusDocument | undefined {
+      function useStatus(): [StatusDocument | undefined, () => void] {
         const [status, setStatus] = React.useState<StatusDocument | undefined>(undefined)
         React.useEffect(() => subscribe(setStatus), [])
-        return status
+        return [status, () => { void load() }]
       }
 
       /** A row of label and value. */
@@ -235,7 +294,7 @@ interface StatusDocument {
 
       /** The pill in the composer's dock. */
       function CreditPill(props: SlotProps) {
-        const status = useStatus()
+        const [status] = useStatus()
         const [open, setOpen] = React.useState(false)
         const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
           const template = zh[key] ?? key
@@ -279,6 +338,121 @@ interface StatusDocument {
         )
       }
 
+      /** Ask the host to do something, and let the card read the result. */
+      async function act(action: string, body?: Record<string, unknown>): Promise<void> {
+        try {
+          await fetch(`${ACTION_PATH}?action=${encodeURIComponent(action)}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body ?? {}),
+          })
+        } catch {
+          // The card shows the state the host reports; a failed request is
+          // reported there too.
+        }
+        // Read the state the host produced, so the card shows what happened.
+        void load()
+      }
+
+      /**
+       * The sign-in block.
+       *
+       * The plugin can sign in on its own: the person authorizes in their own
+       * browser, and the plugin never sees a password. When the desktop app
+       * is already signed in, that credential is used and this block says so.
+       */
+      function loginBlock(
+        t: (key: string, params?: Record<string, unknown>) => string,
+        login: StatusDocument['login'],
+        refresh: () => void,
+      ): unknown {
+        if (login === undefined) return null
+        if (login.state === 'signed-in') {
+          return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+            row(t('loginTitle'), login.source === 'plugin' ? t('loginPlugin') : t('loginDesktop')),
+          )
+        }
+        if (login.state === 'pending') {
+          return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+            row(t('loginTitle'), t('loginPending')),
+            login.userCode !== undefined && login.userCode.length > 0
+              ? row(t('loginCode'), login.userCode)
+              : null,
+            login.verificationUriComplete !== undefined && login.verificationUriComplete.length > 0
+              ? h('a', {
+                  href: login.verificationUriComplete,
+                  target: '_blank',
+                  rel: 'noreferrer',
+                  style: linkStyle,
+                }, t('loginOpen'))
+              : null,
+            h('button', { type: 'button', style: actionButtonStyle, onClick: () => { void act('login-poll') } }, t('loginPolled')),
+          )
+        }
+        return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+          row(t('loginTitle'), t('loginSignedOut')),
+          h('button', { type: 'button', style: actionButtonStyle, onClick: () => { void act('login-start') } }, t('loginStart')),
+        )
+      }
+
+      /**
+       * The check-in block.
+       *
+       * The cycle is seven days; the card shows which day it is and what the
+       * day is worth, and lets the person claim it — or leave it to the
+       * plugin, once a day, and only when the server says the day can be
+       * claimed.
+       */
+      function signinBlock(
+        t: (key: string, params?: Record<string, unknown>) => string,
+        signin: StatusDocument['signin'],
+        refresh: () => void,
+      ): unknown {
+        if (signin === undefined) return null
+        return h('div', { style: sectionBoxStyle, 'data-minimax-signin': true },
+          h('div', { style: sectionTitleStyle }, t('signinTitle')),
+          signin.today === undefined
+            ? h('div', { style: mutedStyle }, t('signinUnavailable'))
+            : h('div', { style: rowStyle },
+              h('span', null, t('signinToday', { day: signin.today.dayNo, points: signin.today.points })),
+              h('span', null, signin.today.claimed ? t('signinClaimed') : signin.today.claimable ? t('signinClaimable') : t('signinUnavailable'))),
+          (signin.days ?? []).length === 0
+            ? null
+            : h('div', { style: dayRowStyle },
+              ...(signin.days ?? []).map(day_ =>
+                h('span', {
+                  key: `day-${day_.dayNo}`,
+                  title: `${day_.dayNo}: ${day_.points}`,
+                  style: {
+                    ...dayDotStyle,
+                    ...day_.isToday ? dayTodayStyle : {},
+                    ...day_.status === 3 ? dayClaimedStyle : {},
+                  },
+                }, String(day_.dayNo)))),
+          signin.cyclePoints !== undefined
+            ? h('div', { style: mutedStyle }, t('signinCycle', { points: signin.cyclePoints }))
+            : null,
+          signin.lastClaimDay !== undefined
+            ? h('div', { style: mutedStyle }, t('signinLast', { day: signin.lastClaimDay, points: signin.lastClaimPoints ?? 0 }))
+            : null,
+          h('div', { style: rowStyle },
+            h('label', { style: checkboxStyle },
+              h('input', {
+                type: 'checkbox',
+                checked: signin.autoCheckin === true,
+                onChange: (event: { target?: { checked?: boolean } }) => {
+                  void act('settings', { autoCheckin: event.target?.checked === true })
+                },
+              }),
+              h('span', null, t('signinAuto'))),
+            signin.today?.claimable === true
+              ? h('button', { type: 'button', style: actionButtonStyle, onClick: () => { void act('claim') } }, t('signinClaim'))
+              : null,
+          ),
+          signin.error !== undefined ? h('div', { style: mutedStyle }, signin.error) : null,
+        )
+      }
+
       /**
        * The card on the plugin's own page.
        *
@@ -286,13 +460,15 @@ interface StatusDocument {
        * is the full card, where the expiry detail belongs.
        */
       function PluginPage(props: SlotProps) {
-        const status = useStatus()
+        const [status, refresh] = useStatus()
         const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
           const template = zh[key] ?? key
           return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params?.[name] ?? ''))
         })
         const credits_ = status?.credits
         const usage = status?.usage
+        const signin = status?.signin
+        const login = status?.login
         const available = credits_?.state === 'ok' && credits_.total !== undefined
 
         if (props.view === 'summary') {
@@ -302,6 +478,7 @@ interface StatusDocument {
             credits_!.expiring !== undefined && credits_!.expiring > 0
               ? ` · ${t('expiringIn', { amount: credits(credits_!.expiring, 2), date: day(credits_!.nextExpiryAtMs) })}`
               : '',
+            signin?.today?.claimable === true ? ` · ${t('claimableToday')}` : '',
           )
         }
 
@@ -311,6 +488,7 @@ interface StatusDocument {
             h('div', { style: rowStyle },
               h('span', null, t('unavailable')),
               h('span', null, credits_?.state === 'expired' ? t('expired') : '')),
+            loginBlock(t, login, refresh),
           )
         }
 
@@ -320,6 +498,7 @@ interface StatusDocument {
           row(t('free'), credits(credits_!.free, 3)),
           row(t('purchased'), credits(credits_!.purchased, 3)),
           expiryBlock(t, credits_),
+          signinBlock(t, signin, refresh),
           h('div', { style: sectionTitleStyle }, t('lots')),
           (credits_!.upcoming ?? []).length === 0
             ? h('div', { style: mutedStyle }, t('noLots'))
@@ -336,6 +515,7 @@ interface StatusDocument {
               usage.requests > 0 ? row(t('requests', { count: usage.requests }), usage.lastModel ?? '') : null,
             )
             : null,
+          loginBlock(t, login, refresh),
           credits_!.updatedAtMs !== undefined
             ? h('div', { style: mutedStyle }, t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }))
             : null,
@@ -400,6 +580,42 @@ interface StatusDocument {
       const sectionTitleStyle = { marginTop: '8px', fontWeight: 600 }
       const mutedStyle = { opacity: 0.7, fontSize: '12px' }
       const listStyle = { listStyle: 'none', margin: 0, padding: 0 }
+      const sectionBoxStyle = {
+        marginTop: '10px',
+        paddingTop: '8px',
+        borderTop: '1px solid var(--dsh-panel-border, currentColor)',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '6px',
+      }
+      const actionButtonStyle = {
+        appearance: 'none' as const,
+        background: 'transparent',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        borderRadius: '6px',
+        color: 'inherit',
+        cursor: 'pointer',
+        font: 'inherit',
+        fontSize: '12px',
+        padding: '2px 10px',
+        width: 'fit-content',
+      }
+      const linkStyle = { color: 'inherit', fontSize: '12px' }
+      const checkboxStyle = { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px' }
+      const dayRowStyle = { display: 'flex', gap: '6px', flexWrap: 'wrap' as const }
+      const dayDotStyle = {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '22px',
+        height: '22px',
+        borderRadius: '999px',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        fontSize: '11px',
+        opacity: 0.6,
+      }
+      const dayTodayStyle = { opacity: 1, fontWeight: 600 }
+      const dayClaimedStyle = { background: 'var(--dsh-panel-border, currentColor)', opacity: 0.9 }
       const usageBoxStyle = {
         marginTop: '8px',
         paddingTop: '6px',

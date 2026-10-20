@@ -2,7 +2,7 @@
   "name": "dsh-connect-minimaxcode",
   "displayName": "DSH Connect MiniMax Code",
   "description": "把本机已登录的 MiniMax Code 桌面 App 模型接入 DeepSeek Harness：零配置、Anthropic Messages 兼容、动态模型目录，并显示积分余额与到期 — bring MiniMax Code desktop app models into DSH with a dynamic model catalog and a credit balance with expiry details.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "author": "JeffTsuiCUG",
   "license": "MIT",
   "private": false,

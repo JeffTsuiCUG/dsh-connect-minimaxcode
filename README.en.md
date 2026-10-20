@@ -45,13 +45,19 @@ Another implementation in the same direction is **[dingminhua/dsh-connect-workbu
 - **Credit balance at a glance**: the pill under the input box shows the remaining MiniMax Code credits and the consumption accumulated on this machine
 - **Live usage accounting**: the token usage of every request is taken from the upstream response itself, and can be converted to an equivalent cost using the official price list
 - **Reuses the official adapter**: upstream speaks the standard Anthropic Messages protocol, so DSH's built-in provider is reused as is; tool calls, reasoning blocks and context compaction are all handled by DSH
-- **Read-mostly**: apart from "refreshing an expired desktop app login state", the plugin does not write to or modify any MiniMax file, and does not perform any login action
+- **Works without the desktop app**: the plugin can sign in on its own with the OAuth device code flow; you confirm in your own browser and the plugin never sees a password
+- **Daily check-in**: MiniMax Code grants credits every day and the desktop app does **not** claim them for you; the plugin shows the seven-day cycle and can claim the day's grant
+- **Read-mostly**: apart from "refreshing an expired desktop app login state" and the sign-in you start yourself, the plugin does not write to or modify any MiniMax file
 - **Non-intrusive UI**: the pill takes a single row in the dock under the input box, and changes nothing else in the DSH interface
 
 ## Prerequisites
 
-1. The MiniMax Code desktop app (China region) is installed and **signed in**
-2. DSH desktop (built-in core in the `0.2.0` series) or the Web profile
+Either:
+
+1. **The MiniMax Code desktop app (China region) installed and signed in** — the plugin reuses its sign-in (the easy way)
+2. **Nothing installed** — press "Sign in to MiniMax Code" on the plugin page; the plugin starts an OAuth device code flow and you confirm with your own MiniMax account in a browser (this needs `account.minimax.cn` to be reachable)
+
+Plus DSH desktop (built-in core in the `0.2.0` series) or the Web profile.
 
 ## Installation
 
@@ -151,6 +157,47 @@ These are the differences that had to be handled in practice, and they are the m
 
 The plugin contains **no** hardcoded token, account or API key.
 
+## Signing in without the desktop app
+
+The plugin can sign in on its own, using the same **OAuth 2.0 device authorization grant** (RFC 8628) the desktop app uses:
+
+1. The plugin asks `account.minimax.cn/oauth2/device/code` for a device code and gets an eight-character user code and the page to authorize it.
+2. You open that page, sign in to **your own** MiniMax account, and approve the request.
+3. The plugin polls `oauth2/token` and receives the `mmoat_` token and a refresh token.
+
+What this means in practice:
+
+- **The plugin never sees a password or a verification code** — the only human step happens in your own browser, on the account site's own page.
+- **PKCE is used**, so a leaked device code cannot be redeemed without the verifier that never leaves the process.
+- **One token is enough**: the `mmoat_` token works against the model gateway (`agent.minimax.cn/mavis/api/v1/llm`) *and* the account endpoints (credits, check-in), so one sign-in covers all of it.
+- **The desktop app's files are left alone.** The plugin keeps its own credential in `~/.dsh/.minimaxcode-auth.json` (mode 0600, atomic write). The app's two files carry `generation` counters that must stay in step, and writing there would look like a sign-in somewhere else and force a new one.
+- **The refresh token rotates**, so the plugin writes the new pair back to its own file and the sign-in keeps working.
+
+## The daily check-in
+
+The free credits are granted by a **daily check-in**, not by signing in. The desktop app has a "每日签到" card, but it does **not** claim on its own — the card opens and you press the button.
+
+The upstream endpoints are:
+
+```
+GET  /minimax-cloud/api/v1/signin/status?timezone_id=Asia/Shanghai   # the seven-day cycle
+POST /minimax-cloud/api/v1/signin/claim?timezone_id=Asia/Shanghai   # claim today's grant
+```
+
+Measured behaviour:
+
+- **The time zone must be an IANA name** (`Asia/Shanghai`). An offset, or none at all, is answered with `invalid timezone_id`.
+- **A cycle runs seven days**: 400 / 400 / 400 / 1000 / 400 / 400 / 1000 = **4000 credits**.
+- **Claimed credits are valid for thirty days** (the response's `expire_at_ms` is exactly thirty days later, at midnight in the account's time zone).
+- **The claim is idempotent per day**: claiming again answers `claim_result: 2` (already claimed) and grants nothing.
+
+The plugin page shows which day of the cycle it is, what that day is worth, and which days are left, and offers two actions:
+
+- **A "Claim" button** — you press it and the plugin claims the day's grant.
+- **A "Claim daily on its own" switch** (off by default) — with it on, the plugin claims once a day, and only when the server itself says the day can be claimed.
+
+The automatic claim is deliberately restrained: it only asks when the upstream says the day is claimable, at most once a day, never concurrently, never around any verification, and it shows the reason when something goes wrong rather than retrying quietly. Please check that this is within MiniMax's terms of service yourself.
+
 ## Credit balance and usage
 
 The pill under the composer input box shows the **remaining MiniMax Code credits**; expanding it also shows the granted/purchased split, the consumption between the two reads, and the tokens and equivalent cost accumulated on this machine.
@@ -240,11 +287,21 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **Credits only cover the granted/purchased MiniMax Code credits**; they do not include the Open Platform wallet balance or the purchased credit pool, and the plugin never converts money into credits.
 - **The balance is an account-level number**, so the difference between two reads includes concurrent spend from the other MiniMax Code clients; the consumption of this machine alone is the token count and the equivalent cost in the pill.
 - **The equivalent cost is an estimate converted at the public price list**, not an actual charge; MiniMax publishes no exchange rate between tokens and credits.
-- **When the OAuth token expires the credit pill is temporarily unavailable**; open the MiniMax Code desktop app once and let it refresh itself (or wait for the plugin's refresh to succeed). This does not affect model traffic.
-- **No settings card is provided**. The plugin does not register a card on the DSH settings page; the only interface change is a single pill under the input box.
+- **When the OAuth token expires the credit pill is temporarily unavailable**. With the desktop app's sign-in, open MiniMax Code once and let it refresh itself; with the plugin's own sign-in, the plugin renews it with its refresh token (the server rotates the refresh token, and the plugin writes the new pair back to its own file). This does not affect model traffic.
+- **The check-in needs an account that is entitled to it.** The check-in is an upstream entitlement; the plugin only presses the button for you. When the server says "not claimable now", the plugin says so — it does not retry or work around it.
+- **The automatic claim is off by default**, and it only asks when the server explicitly says the day can be claimed, at most once a day. Whether to turn it on, and whether that is within MiniMax's terms of service, is your call.
+- **No settings card is provided**. The plugin does not register a card on the DSH settings page; the interface it adds is a single pill under the input box and a small card on the plugin page.
 - **The upstream APIs are non-public** and may stop working when MiniMax updates its client. If the balance API breaks, the pill shows "credits unavailable", which does not affect model traffic.
+- **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.0 (2026-10-20)
+
+- **Added "sign in on your own"**: the plugin can sign in to MiniMax Code with the OAuth device code flow, so it no longer depends on the desktop app being installed and signed in. You confirm in your own browser, the plugin never sees a password, and the credential lives in the plugin's own file rather than the client's directory.
+- **Added "daily check-in"**: reads the upstream seven-day cycle (400/400/400/1000/400/400/1000 = 4000 credits per round), shows the day's state and the expiring grants, and offers a manual "Claim" and a "Claim daily on its own" switch that is **off by default**.
+- **Corrected by measurement**: the `mmoat_` token works against **both** the model gateway and the account endpoints (the previous documentation said the OAuth token was refused by the gateway — that was wrong), so one sign-in covers models, credits and the check-in.
+- The plugin now mounts two routes: the status route the card reads, and a POST route for the actions (claim, sign-in, the setting), which is **loopback-only**.
 
 ### 0.4.2 (2026-10-19)
 

@@ -75,3 +75,41 @@ describe('isLoopback', () => {
     expect(isLoopback(undefined)).toBe(false)
   })
 })
+describe('the check-in and sign-in sections', () => {
+  it('carries the cycle and the sign-in state', () => {
+    const document = statusDocument({
+      auth: { state: 'signed-in', daysRemaining: 10, expiry: 'healthy' },
+      region: 'cn',
+      catalogSource: 'live',
+      models: [],
+      refreshing: false,
+      signin: {
+        state: 'ok',
+        today: { dayNo: 7, points: 1000, status: 2, claimable: true, claimed: false },
+        days: [{ dayNo: 7, points: 1000, status: 2, isToday: true }],
+        cyclePoints: 4000,
+        autoCheckin: true,
+      },
+      login: { state: 'signed-in', source: 'plugin' },
+    })
+    expect(document.signin?.today?.claimable).toBe(true)
+    expect(document.signin?.cyclePoints).toBe(4000)
+    expect(document.signin?.autoCheckin).toBe(true)
+    expect(document.login?.source).toBe('plugin')
+  })
+
+  it('never carries a token', () => {
+    const document = statusDocument({
+      auth: { state: 'signed-in', daysRemaining: 10, expiry: 'healthy' },
+      region: 'cn',
+      catalogSource: 'live',
+      models: [],
+      refreshing: false,
+      login: { state: 'pending', userCode: 'XW6G-QEGA', verificationUri: 'https://account.minimax.cn/oauth-authorize' },
+    })
+    // The device code is shown to the person; the token never is.
+    expect(document.login?.userCode).toBe('XW6G-QEGA')
+    expect(JSON.stringify(document)).not.toContain('mmoat_')
+    expect(JSON.stringify(document)).not.toContain('accessToken')
+  })
+})

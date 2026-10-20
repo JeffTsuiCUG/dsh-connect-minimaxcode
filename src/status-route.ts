@@ -14,6 +14,60 @@ import { daysRemaining, expiryLevel, MINIMAX_REGIONS } from './auth.ts'
 /** Route this plugin mounts, matching its settings card. */
 export const MINIMAX_STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
 
+/** Route the card posts to when it wants something done rather than read. */
+export const MINIMAX_ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
+
+/** The daily check-in, as the card reads it. */
+export interface SigninStatus {
+  /** Whether the cycle could be read. */
+  state: 'ok' | 'unavailable'
+  /** Today's day in the cycle. */
+  today?: {
+    /** Which day of the cycle it is, 1 to 7. */
+    dayNo: number
+    /** Points the day grants. */
+    points: number
+    /** The day's status, as the upstream numbers it. */
+    status: number
+    /** Whether the day can be claimed. */
+    claimable: boolean
+    /** Whether the day is already claimed. */
+    claimed: boolean
+  }
+  /** The days of the cycle. */
+  days?: { dayNo: number; points: number; status: number; isToday: boolean }[]
+  /** Points the whole cycle is worth. */
+  cyclePoints?: number
+  /** Whether the plugin claims the day's grant on its own. */
+  autoCheckin: boolean
+  /** The day the last claim happened. */
+  lastClaimDay?: string
+  /** When the last claim happened, in milliseconds since the epoch. */
+  lastClaimAtMs?: number
+  /** Points the last claim granted. */
+  lastClaimPoints?: number
+  /** Whether the last claim was credited, or the day was already claimed. */
+  lastClaimResult?: number
+  /** Why the cycle or the claim could not be read. */
+  error?: string
+}
+
+/** How the plugin is signed in, as the card reads it. */
+export interface LoginStatus {
+  /** Whether the plugin has a usable credential. */
+  state: 'signed-in' | 'signed-out' | 'pending'
+  /** Where the credential came from. */
+  source?: 'plugin' | 'desktop-app'
+  /** The code to type on the account page, while a sign-in is waiting. */
+  userCode?: string
+  /** Where to authorize. */
+  verificationUri?: string
+  /** Where to authorize, with the code filled in. */
+  verificationUriComplete?: string
+  /** When the device code stops working, in milliseconds since the epoch. */
+  expiresAtMs?: number
+}
+
 /** The account's credit balance, as the desktop app shows it. */
 export interface CreditStatus {
   /** Whether the balance could be read. */
@@ -83,6 +137,10 @@ export interface StatusDocument {
   credits?: CreditStatus
   /** What this host's requests have used. */
   usage?: UsageStatus
+  /** The daily check-in, when it could be read. */
+  signin?: SigninStatus
+  /** How the plugin is signed in. */
+  login?: LoginStatus
 }
 
 /** Inputs the document is derived from. */
@@ -102,6 +160,10 @@ export interface StatusDeps {
   credits?: CreditStatus
   /** What this host's requests have used. */
   usage?: UsageStatus
+  /** The daily check-in, when the account API could be reached. */
+  signin?: SigninStatus
+  /** How the plugin is signed in. */
+  login?: LoginStatus
 }
 
 const HINTS: Record<string, string> = {
@@ -129,6 +191,8 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     refreshing: deps.refreshing,
     ...deps.credits === undefined ? {} : { credits: deps.credits },
     ...deps.usage === undefined ? {} : { usage: deps.usage },
+    ...deps.signin === undefined ? {} : { signin: deps.signin },
+    ...deps.login === undefined ? {} : { login: deps.login },
   }
   if (auth.state === 'expired') {
     return {
