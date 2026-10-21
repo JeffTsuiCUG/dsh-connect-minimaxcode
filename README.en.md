@@ -346,6 +346,25 @@ For earlier versions, see [GitHub Releases](https://github.com/JeffTsuiCUG/dsh-c
 
 The plugin ships an installable `dsh.bundle` manifest and is published to npm. The directory of the community plugin marketplace (`dshmarket`) is generated from the [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) registry, and this plugin's listing has been submitted as PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110). A draft and the operating notes are kept in the repository: [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/).
 
+**Other directories and marketplaces** (entries submitted or already listed, text refreshed to 0.5.1):
+
+| Channel | State |
+|---|---|
+| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) (the registry) | Listed; entry refresh PR [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) |
+| [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) | PR [#727](https://github.com/0xsline/awesome-deepseek-harness/pull/727) |
+| [Awesome-DeepSeek-Harness-Plugins](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins) | PR [#92](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins/pull/92) |
+| [dsh-suite](https://github.com/whyihaveyou/dsh-suite) | PR [#66](https://github.com/whyihaveyou/dsh-suite/pull/66) |
+| [awesome-dsh-plugins](https://github.com/kejixiaoliang/awesome-dsh-plugins) | PR [#143](https://github.com/kejixiaoliang/awesome-dsh-plugins/pull/143) |
+| [awesome-dsh-plugins](https://github.com/dshworks/awesome-dsh-plugins) | PR [#176](https://github.com/dshworks/awesome-dsh-plugins/pull/176) |
+| [awesome-deepseek-harness](https://github.com/awesome-deepseekharness/awesome-deepseek-harness) | PR [#177](https://github.com/awesome-deepseekharness/awesome-deepseek-harness/pull/177) |
+| [dsh-plugin-radar](https://github.com/AdamPlatin123/dsh-plugin-radar) | PR [#964](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/964) |
+| [dsh-community-plugins](https://github.com/zhu1090093659/dsh-community-plugins) | PR [#46](https://github.com/zhu1090093659/dsh-community-plugins/pull/46) |
+| [dsh-plugin.org](https://github.com/dshplugin/dsh-plugin-hub) | Listed (automatic scan; the npm package shows up in the DSH plugin centre) |
+| [dshbase](https://github.com/ylwl1997/dshbase) | Listed |
+| [awesome-deepseek-harness-plugins](https://github.com/walkinglabs/awesome-deepseek-harness-plugins) | PR [#117](https://github.com/walkinglabs/awesome-deepseek-harness-plugins/pull/117) |
+| [awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness) | PR [#663](https://github.com/Dominic789654/awesome-deepseek-harness/pull/663) |
+| [awesome-deepseek-harness-plugins](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) | PR [#660](https://github.com/imsai-sh/awesome-deepseek-harness-plugins/pull/660) |
+
 Marketplace screenshots are declared, per the current convention, by the **`screenshots.json` in the plugin's own repository root** (the registry's `data/screenshots.json` is a fallback from the old convention, and no new keys are added there). This repository **does not ship screenshots yet**, so the file does not exist; once there are some, put `screenshots.json` in the repository root (an array of relative image paths) and the marketplace card will pick them up.
 
 > **Since 0.5.1 the readout lives in the composer tool row (beside the model picker) and is gated by the host's `modelSelection` projection**: the balance belongs to the provider the next request will actually use, so it sits where that selection is made — and it hides entirely, polling included, when another connector's model (workbuddy, for example) is selected. This follows `dsh-connect-trae`, whose `ComposerPointsGate` returns null for every provider but its own.

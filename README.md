@@ -352,6 +352,25 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 插件已包含可安装的 `dsh.bundle` manifest，并发布到 npm。社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的收录条目已提交为 PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110)，仓库内保留了一份草稿与操作说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)。
 
+**其它目录 / 市场的收录**（条目已提交或已上线，内容随版本更新到 0.5.1）：
+
+| 渠道 | 状态 |
+|---|---|
+| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（官方注册表） | ✅ 已收录；条目更新 PR [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) |
+| [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) | PR [#727](https://github.com/0xsline/awesome-deepseek-harness/pull/727) |
+| [Awesome-DeepSeek-Harness-Plugins](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins) | PR [#92](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins/pull/92) |
+| [dsh-suite](https://github.com/whyihaveyou/dsh-suite) | PR [#66](https://github.com/whyihaveyou/dsh-suite/pull/66) |
+| [awesome-dsh-plugins](https://github.com/kejixiaoliang/awesome-dsh-plugins) | PR [#143](https://github.com/kejixiaoliang/awesome-dsh-plugins/pull/143) |
+| [awesome-dsh-plugins](https://github.com/dshworks/awesome-dsh-plugins) | PR [#176](https://github.com/dshworks/awesome-dsh-plugins/pull/176) |
+| [awesome-deepseek-harness](https://github.com/awesome-deepseekharness/awesome-deepseek-harness) | PR [#177](https://github.com/awesome-deepseekharness/awesome-deepseek-harness/pull/177) |
+| [dsh-plugin-radar](https://github.com/AdamPlatin123/dsh-plugin-radar) | PR [#964](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/964) |
+| [dsh-community-plugins](https://github.com/zhu1090093659/dsh-community-plugins) | PR [#46](https://github.com/zhu1090093659/dsh-community-plugins/pull/46) |
+| [dsh-plugin.org](https://github.com/dshplugin/dsh-plugin-hub) | ✅ 已收录（自助扫描，会随目录更新出现在 DSH「插件中心」） |
+| [dshbase](https://github.com/ylwl1997/dshbase) | ✅ 已收录 |
+| [awesome-deepseek-harness-plugins](https://github.com/walkinglabs/awesome-deepseek-harness-plugins) | PR [#117](https://github.com/walkinglabs/awesome-deepseek-harness-plugins/pull/117) |
+| [awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness) | PR [#663](https://github.com/Dominic789654/awesome-deepseek-harness/pull/663) |
+| [awesome-deepseek-harness-plugins](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) | PR [#660](https://github.com/imsai-sh/awesome-deepseek-harness-plugins/pull/660) |
+
 市场截图按当前约定由**插件自己仓库根目录的** `screenshots.json` 声明（注册表 `data/screenshots.json` 是旧约定下的回退，不再新增键）。本仓库目前**尚未提供截图**，所以还没有这个文件；补上截图后，在根目录放 `screenshots.json`（内容是图片相对路径的数组）即可被市场卡片取用。
 
 > **0.5.1 起，读数移到输入框工具行（模型选择器旁）并按宿主 `modelSelection` 投影做门控**：余额属于「下一次请求真正会用的那个 provider」，所以它既该待在选模型的地方，也该在选中别的反代插件（如 workbuddy）时**整体隐藏、且不发轮询请求**——这是学习 `dsh-connect-trae` 的做法（其 `ComposerPointsGate` 对非自家 provider 一律 `return null`）。
