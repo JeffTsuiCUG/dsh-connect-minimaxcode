@@ -49,6 +49,7 @@ Another implementation in the same direction is **[dingminhua/dsh-connect-workbu
 - **Daily check-in**: MiniMax Code grants credits every day and the desktop app does **not** claim them for you; the plugin shows the seven-day cycle and can claim the day's grant
 - **Read-mostly**: apart from "refreshing an expired desktop app login state" and the sign-in you start yourself, the plugin does not write to or modify any MiniMax file
 - **Follows the selected model**: the balance sits in the **composer tool row beside the model picker**, and is drawn **only while a MiniMax model is selected** — picking another connector's model hides it entirely instead of misleading you with MiniMax's balance
+- **An icon and two languages of its own**: a 48×48 SVG ships with the package, so the plugin page no longer shows the default placeholder; the title and the introduction come in Chinese and English, and the interface follows the host's language
 
 ## Prerequisites
 
@@ -295,6 +296,13 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.2 (2026-10-21)
+
+- **An icon for the plugin page**: a new `icon.svg` (48×48, under 800 bytes) ships with the package, declared as `"icon": "./icon.svg"` in `package.json`. The host reads it as a data URL and draws it on the plugin page instead of the default placeholder.
+- **Chinese and English title and introduction**: new `locale/en.json` and `locale/zh.json` (the host reads the language files in the package root's `locale/` directory, with the English file as the anchor). The plugin page used to show the package name `dsh-connect-minimaxcode` and the mixed-language description from package.json; the title is now `DSH Connect MiniMax Code` and the introduction comes in both languages.
+- **The interface follows the host's language**: neither the composer nor the plugin-page slot carries a translator in its standard props, so the copy always came from the built-in Chinese fallback — Chinese labels even in an English host. The bound locale is now injected into both slots, so an English host shows English.
+- `exports` gains `./locale/*` (the host resolves the language files through it) and `files` gains `locale` and `icon.svg`.
 
 ### 0.5.1 (2026-10-20)
 

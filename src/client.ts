@@ -49,6 +49,13 @@ interface SlotContext {
       key?: string
       order?: number
       locale?: string
+      /**
+       * Extra props the host hands to the component.
+       *
+       * The composer and plugin-page slots do not carry a translator in
+       * their standard props, so the bound locale is injected here.
+       */
+      inject?: () => Record<string, unknown>
     }, component: (props: SlotProps) => unknown): unknown
   }
   locale: {
@@ -672,6 +679,11 @@ interface StatusDocument {
           const context = ctx as SlotContext
           // Visible text goes through the host's locale service.
           context.effect(() => context.locale.register(NAMESPACE, { zh, en }), `${BUNDLE_NAME}: locale`)
+          // The composer and plugin-page slots carry no translator in their
+          // standard props, so the bound one is injected into both. Without
+          // this the components fall back to their own Chinese copy and an
+          // English host shows Chinese labels.
+          const t = context.locale.bind(NAMESPACE)
           // The tool row to the left of the composer — beside the model
           // picker — rather than the ambient strip below it: the balance
           // belongs to the provider that is selected, so it sits where that
@@ -682,6 +694,7 @@ interface StatusDocument {
             id: 'minimax-credits',
             order: 4,
             locale: NAMESPACE,
+            inject: () => ({ t }),
           }, CreditPillGate))
           // The plugin's own page, keyed by the package name, where the
           // balance and the expiry schedule are spelled out.
@@ -689,6 +702,7 @@ interface StatusDocument {
             name: 'plugins.bundle.config',
             key: BUNDLE_NAME,
             locale: NAMESPACE,
+            inject: () => ({ t }),
           }, PluginPage))
         },
       }

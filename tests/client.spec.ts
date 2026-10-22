@@ -102,7 +102,10 @@ function renderDeep(
 interface Loaded {
   registrations: { id: string; factory(require: (id: string) => unknown): { inject: string[]; apply(ctx: unknown): void } }[]
   slotNames: string[]
-  slots: { options: { name: string; id?: string; key?: string; order?: number }; component: (props: unknown) => unknown }[]
+  slots: {
+    options: { name: string; id?: string; key?: string; order?: number; inject?: () => Record<string, unknown> }
+    component: (props: unknown) => unknown
+  }[]
   /** How many times the sandboxed status route has been fetched. */
   fetchCount: number
 }
@@ -183,6 +186,65 @@ describe('client bundle', () => {
     // page finds the entry that belongs to this bundle.
     expect(loaded.slots[1]?.options.name).toBe('plugins.bundle.config')
     expect(loaded.slots[1]?.options.key).toBe('dsh-connect-minimaxcode')
+  })
+
+  it('injects the bound locale into both slots', () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (name: string, register: () => unknown) => {
+          loaded.slotNames.push(name)
+          return register()
+        },
+        register: (options: { name: string; id?: string; key?: string; order?: number; inject?: () => Record<string, unknown> }, component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: {
+        register: () => {},
+        // A translator that echoes its key, so the test can tell it apart
+        // from the components' own Chinese copy.
+        bind: () => (key: string) => `T:${key}`,
+      },
+      effect: (effect: () => unknown) => effect(),
+    })
+    // The composer and plugin-page slots carry no translator of their own,
+    // so the bound one has to be injected into both.
+    expect(loaded.slots).toHaveLength(2)
+    for (const slot of loaded.slots) {
+      expect(typeof slot.options.inject).toBe('function')
+      const props = slot.options.inject!()
+      expect(typeof props.t).toBe('function')
+      expect((props.t as (key: string) => string)('balance')).toBe('T:balance')
+    }
+  })
+
+  it('renders the injected translation rather than its own Chinese copy', () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: { name: string; id?: string; key?: string; order?: number; inject?: () => Record<string, unknown> }, component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: {
+        register: () => {},
+        bind: () => (key: string) => `T:${key}`,
+      },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const slot = loaded.slots.find(entry => entry.options.name === 'conversation.input.left')!
+    const tree = JSON.stringify(renderDeep(harness, slot.component, { ...slot.options.inject!() }))
+    // The host's translator wins; the Chinese fallback stays out of it.
+    expect(tree).toContain('T:unavailable')
+    expect(tree).not.toContain('积分不可用')
   })
 
   it('shows the credits that are about to expire', async () => {

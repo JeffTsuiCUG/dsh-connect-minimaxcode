@@ -2,7 +2,7 @@
   "name": "dsh-connect-minimaxcode",
   "displayName": "DSH Connect MiniMax Code",
   "description": "把本机已登录的 MiniMax Code 桌面 App 模型接入 DeepSeek Harness：零配置、Anthropic Messages 兼容、动态模型目录，并显示积分余额与到期 — bring MiniMax Code desktop app models into DSH with a dynamic model catalog and a credit balance with expiry details.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": "JeffTsuiCUG",
   "license": "MIT",
   "private": false,
@@ -23,6 +23,7 @@
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.1-rc.2 <0.3.0-0"
   },
+  "icon": "./icon.svg",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
@@ -32,10 +33,14 @@
     },
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./icon.svg": "./icon.svg",
+    "./locale/*": "./locale/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "locale",
+    "icon.svg",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"

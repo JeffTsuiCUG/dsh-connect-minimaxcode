@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH Connect MiniMax Code",
+    "description": "把 MiniMax Code 的模型接入 DSH：复用桌面 App 登录态，或用 OAuth 设备码自己登录；带实时模型目录、每日签到，以及跟随所选模型显示的积分余额与到期提示。"
+  }
+}
