@@ -448,6 +448,11 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 
 > 该插件的版本需与你的 DSH 内核严格对应（不同内核线用不同版本），安装前请见其 README 的版本对应表。
 
+## 贡献者
+
+- **[eghrhegpe](https://github.com/eghrhegpe)** —— 提出了插件页图标与中英文文案的建议（[#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)）。这条建议促成了 0.5.2：插件页有了自己的 SVG 图标，标题与简介有了中英两版，界面文案也开始跟随宿主语言。
+- 插件作者：**[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
+
 ## 致谢
 
 - **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** — **本插件的灵感来源**。「复用桌面 App 本机登录态、把已登录模型接进 DSH」的整体思路由该项目最早确立，本插件沿用同一做法；凭据只读复用的设计也参照于此。

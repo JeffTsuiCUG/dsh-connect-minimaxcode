@@ -442,6 +442,11 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 
 > This plugin's version must match your DSH core exactly (each core line uses a different version); see the version table in its README before installing.
 
+## Contributors
+
+- **[eghrhegpe](https://github.com/eghrhegpe)** — raised the request for a plugin-page icon and Chinese/English copy ([#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)). It became 0.5.2: the plugin page has its own SVG artwork, the title and the introduction come in both languages, and the interface follows the host's language.
+- Plugin author: **[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
+
 ## Acknowledgements
 
 - **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** — **the inspiration for this plugin**. The overall idea of "reuse the desktop app's local login state and bring the already-signed-in model into DSH" was established first by that project, and this plugin follows the same approach; the read-only reuse of credentials was designed with it in mind.
