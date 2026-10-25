@@ -461,6 +461,7 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 ## 贡献者
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** —— 提出了插件页图标与中英文文案的建议（[#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)）。这条建议促成了 0.5.2：插件页有了自己的 SVG 图标，标题与简介有了中英两版，界面文案也开始跟随宿主语言。
+- **[qzz19970504](https://github.com/qzz19970504)** —— 定位并修复了「发图必然失败」的接线缺口（[#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)）：模型目录声明了 `image` 模态，但适配器没有把宿主的持久化附件服务接上，导致带图请求被 pi-ai 在发出前拒掉。该修复成为 0.5.3。
 - 插件作者：**[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## 致谢
