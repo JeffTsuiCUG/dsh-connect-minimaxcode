@@ -30,6 +30,11 @@ async function useDataDir(body?: string): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'mmx-degraded-'))
   if (body !== undefined) await writeFile(join(dir, MINIMAX_AUTH_FILENAME), body)
   process.env.MINIMAX_DATA_DIR = dir
+  // The plugin's own credential lives under DSH_HOME, not under the desktop
+  // app's data directory: without pointing it at the same throwaway location,
+  // a real sign-in on this machine leaks into these "no usable token" cases
+  // and the catalog resolves live instead of falling back.
+  process.env.DSH_HOME = dir
 }
 
 const plugin = { name, inject, apply }
@@ -74,14 +79,18 @@ interface StatusShape {
 
 describe('without a usable token', () => {
   const original = process.env.MINIMAX_DATA_DIR
+  const originalHome = process.env.DSH_HOME
 
   beforeEach(() => {
     delete process.env.MINIMAX_DATA_DIR
+    delete process.env.DSH_HOME
   })
 
   afterEach(() => {
     if (original === undefined) delete process.env.MINIMAX_DATA_DIR
     else process.env.MINIMAX_DATA_DIR = original
+    if (originalHome === undefined) delete process.env.DSH_HOME
+    else process.env.DSH_HOME = originalHome
   })
 
   it('still loads and registers its provider, so the host starts', async () => {
