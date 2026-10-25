@@ -61,6 +61,8 @@ Either:
 
 Plus DSH desktop (built-in core `>=0.2.1-rc.2 <0.3.0`, see `engines.dsh` in `package.json`; tested on `0.2.1-rc.2`) or the Web profile.
 
+> **Sending a picture needs the host's attachment service**: the plugin does not read images itself — the host's durable attachment service turns a stored reference into request bytes, and the plugin only connects the two. On a host without that service the plugin still loads and text still works; only image requests are refused (`pi-ai image input requires the durable attachment service`).
+
 ## Installation
 
 **Option 1: install from the Git repository** (recommended, gets the latest code)
@@ -294,6 +296,7 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The automatic claim is off by default**, and it only asks when the server explicitly says the day can be claimed, at most once a day. Whether to turn it on, and whether that is within MiniMax's terms of service, is your call.
 - **No settings card is provided**. The plugin does not register a card on the DSH settings page; the interface it adds is a single pill in the composer tool row (**drawn only while this plugin's model is selected**) and a small card on the plugin page.
 - **The upstream APIs are non-public** and may stop working when MiniMax updates its client. If the balance API breaks, the pill shows "credits unavailable", which does not affect model traffic.
+- **Image input depends on the host's attachment service.** The catalog declares the `image` modality (`M3`, `M3.1-Flash`), but turning a durable attachment into request bytes is the host's job: without that service the plugin still loads and serves text, and only image requests are refused.
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
