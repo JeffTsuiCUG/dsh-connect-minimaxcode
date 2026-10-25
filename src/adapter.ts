@@ -15,7 +15,7 @@ import { anthropicMessagesApi } from '@earendil-works/pi-ai/api/anthropic-messag
 import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, PreparedAdapterCall, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
-import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import type { PiAiAdapterOptions, ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { MinimaxCatalog, CatalogModel } from './catalog.ts'
 import { MINIMAXCODE_PROVIDER_ID } from './catalog.ts'
@@ -109,6 +109,17 @@ export interface AdapterOptions {
    * transcript, so what is reported is what was actually billed.
    */
   onUsage?: (model: string, usage: ModelUsage) => void
+  /**
+   * Resolve the host's durable attachment service at request time.
+   *
+   * Required for image input: without it the pi-ai adapter rejects any message
+   * carrying an image with `UNSUPPORTED_CONTENT`, because it cannot turn a
+   * durable reference into request bytes. Optional here only so a host that
+   * provides no such service can still load this plugin and serve text.
+   */
+  resolveAttachments?: PiAiAdapterOptions['resolveAttachments']
+  /** Bridge one attachment into the current tool execution world. */
+  resolveImageAccess?: PiAiAdapterOptions['resolveImageAccess']
 }
 
 /** What {@link createMinimaxCodeAdapter} hands back. */
@@ -254,6 +265,14 @@ export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle
     profiles: () => profiles,
     resolveApiKey: options.resolveApiKey,
     auth: INERT_AUTH,
+    // Image input is not a model capability this plugin can grant by itself:
+    // pi-ai needs the host's durable attachment store to turn a stored
+    // reference into request bytes, and refuses the call without it. Passing
+    // the two hooks is what makes the image modalities the catalog advertises
+    // actually usable. A host that provides no attachment service passes
+    // `undefined`, and text-only calls keep working unchanged.
+    ...options.resolveAttachments === undefined ? {} : { resolveAttachments: options.resolveAttachments },
+    ...options.resolveImageAccess === undefined ? {} : { resolveImageAccess: options.resolveImageAccess },
   })
   const adapter = options.onUsage === undefined
     ? inner

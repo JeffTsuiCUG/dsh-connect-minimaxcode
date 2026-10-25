@@ -50,6 +50,7 @@
 - **只读为主**：除「续期已过期的桌面 App 登录态」和「你自己发起的登录」外，不写入、不修改 MiniMax 的任何文件
 - **跟随所选模型**：余额显示在**输入框工具行（模型选择器旁）**，且**只在选中 MiniMax 模型时出现** —— 切到其他反代插件的模型就整体隐藏，不会拿着 MiniMax 的余额误导你
 - **插件页有自己的图标与中英文**：随包发布一张 48×48 的 SVG，插件页不再显示默认占位图；标题与简介按宿主语言给中英文两版，界面文案也跟着宿主语言走
+- **能看图**：模型目录里声明了 `image` 输入模态的模型（`M3`、`M3.1-Flash`）可以直接发图；图片由宿主的附件服务读成请求字节，插件只负责把持久化的附件引用接上去
 
 ## 前置条件
 
@@ -302,6 +303,12 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.5.3（2026-10-25）
+
+- **修复图片输入**：此前发图必然失败 —— `本轮运行失败 pi-ai image input requires the durable attachment service`（`UNSUPPORTED_CONTENT`）。模型目录一直把 `image` 写进模型的输入模态，但插件构造 `PiAiAdapter` 时没有给 `resolveAttachments` 与 `resolveImageAccess` 两个钩子，pi-ai 因此无法把持久化的附件引用变成请求字节，在发往网关之前就拒绝了调用。现在插件按需读取宿主的 `attachments` 服务，并用 `fs.processPathFromHostPath` 把附件的宿主路径映射进当前执行世界；宿主没有提供附件服务时这两个钩子为 `undefined`，纯文本调用不受影响。
+- 新增 `tests/image-input.spec.ts`，钉住两个钩子的解析、路径映射，以及「宿主没有附件服务仍能加载」；`peerDependencies` 增加 `@deepseek-ai/dsh-attachment`。
+- 实测：真实网关 + `M3.1-Flash` 发一张 2×2 PNG，回答正确（`inputTokens: 316`）。
 
 ### 0.5.2（2026-10-21）
 
