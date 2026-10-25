@@ -1,5 +1,6 @@
 import "@earendil-works/pi-ai";
 import { LlmAdapter } from "@deepseek-ai/dsh-llm";
+import { PiAiAdapterOptions } from "@deepseek-ai/dsh-llm-pi-ai";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/auth.d.ts
 /** File the desktop app writes its runtime auth context into. */
@@ -911,6 +912,17 @@ interface AdapterOptions {
    * transcript, so what is reported is what was actually billed.
    */
   onUsage?: (model: string, usage: ModelUsage) => void;
+  /**
+   * Resolve the host's durable attachment service at request time.
+   *
+   * Required for image input: without it the pi-ai adapter rejects any message
+   * carrying an image with `UNSUPPORTED_CONTENT`, because it cannot turn a
+   * durable reference into request bytes. Optional here only so a host that
+   * provides no such service can still load this plugin and serve text.
+   */
+  resolveAttachments?: PiAiAdapterOptions['resolveAttachments'];
+  /** Bridge one attachment into the current tool execution world. */
+  resolveImageAccess?: PiAiAdapterOptions['resolveImageAccess'];
 }
 /** What {@link createMinimaxCodeAdapter} hands back. */
 interface AdapterBundle {

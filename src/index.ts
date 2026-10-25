@@ -23,6 +23,7 @@ import {
 } from './auth.ts'
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
+import { imageInputHooks } from './image-input.ts'
 import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
 import {
@@ -484,6 +485,11 @@ function apply(ctx: Context) {
     // The value is the one the last credential resolution produced, so a
     // sign-in that came from the plugin alone is carried as well.
     bearerToken: () => modelToken,
+    // Image input: the catalog advertises `image` for models that take it, and
+    // these two hooks are what lets pi-ai turn a durable attachment into the
+    // request bytes that modality promises. Without them every image upload
+    // fails as `UNSUPPORTED_CONTENT` before reaching the gateway.
+    ...imageInputHooks(ctx),
     // Every response carries its own usage counters, so the consumption of
     // this host is measured rather than estimated.
     onUsage: (model, usage) => {

@@ -50,6 +50,7 @@ Another implementation in the same direction is **[dingminhua/dsh-connect-workbu
 - **Read-mostly**: apart from "refreshing an expired desktop app login state" and the sign-in you start yourself, the plugin does not write to or modify any MiniMax file
 - **Follows the selected model**: the balance sits in the **composer tool row beside the model picker**, and is drawn **only while a MiniMax model is selected** — picking another connector's model hides it entirely instead of misleading you with MiniMax's balance
 - **An icon and two languages of its own**: a 48×48 SVG ships with the package, so the plugin page no longer shows the default placeholder; the title and the introduction come in Chinese and English, and the interface follows the host's language
+- **Image input**: models whose catalog entry declares the `image` input modality (`M3`, `M3.1-Flash`) take pictures directly; the host's attachment service reads the image into request bytes, and the plugin only has to connect the durable reference to it
 
 ## Prerequisites
 
@@ -296,6 +297,12 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.3 (2026-10-25)
+
+- **Fixed image input**: an upload used to fail every time — `pi-ai image input requires the durable attachment service` (`UNSUPPORTED_CONTENT`). The catalog always declared `image` among a model's input modalities, but the plugin built its `PiAiAdapter` without `resolveAttachments` or `resolveImageAccess`, so pi-ai had no way to turn a durable attachment reference into request bytes and refused the call before it reached the gateway. The plugin now reads the host's `attachments` service on demand and maps an attachment's host path into the current execution world with `fs.processPathFromHostPath`; a host that offers no attachment service gets `undefined` for both hooks, and text-only calls are unchanged.
+- New `tests/image-input.spec.ts` pins how both hooks resolve, the path mapping, and the "no attachment service still loads" case; `peerDependencies` gains `@deepseek-ai/dsh-attachment`.
+- Measured against the live gateway: a 2×2 PNG sent to `M3.1-Flash` came back answered correctly (`inputTokens: 316`).
 
 ### 0.5.2 (2026-10-21)
 
