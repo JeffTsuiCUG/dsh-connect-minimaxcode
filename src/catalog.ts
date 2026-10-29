@@ -43,12 +43,17 @@ export const MINIMAXCODE_PROVIDER_ID = 'minimaxcode'
  * when upstream retired `MiniMax-M2.7` and `MiniMax-M2.7-highspeed` and
  * promoted the model previously served anonymously (internally "space bunny")
  * as `MiniMax-M3.1-Flash`.
+ *
+ * The window is 1,000,000 rather than the 512,000 the upstream `limit` block
+ * reports: 512k is the billing tier boundary, and the gateway itself was
+ * measured serving 946,206 tokens before refusing ~1,050,000 with
+ * `invalid params, context window exceeds limit (2013)`.
  */
 export const FALLBACK_MODELS: readonly CatalogModel[] = [
   {
     id: 'MiniMax-M3',
     name: 'M3',
-    contextWindow: 512000,
+    contextWindow: 1000000,
     maxOutputTokens: 128000,
     toolCall: true,
     reasoning: true,
@@ -58,7 +63,7 @@ export const FALLBACK_MODELS: readonly CatalogModel[] = [
   {
     id: 'MiniMax-M3.1-Flash',
     name: 'M3.1-Flash',
-    contextWindow: 512000,
+    contextWindow: 1000000,
     maxOutputTokens: 128000,
     toolCall: true,
     reasoning: true,
@@ -99,12 +104,45 @@ function usable(id: string, raw: Record<string, unknown>): boolean {
   return id.length > 0 && id.startsWith('MiniMax-') && typeof raw === 'object' && raw !== null
 }
 
+/**
+ * The window the gateway actually enforces.
+ *
+ * Upstream reports two different numbers, and they mean different things:
+ * `limit.context` is the *default* window — the billing tier boundary, above
+ * which input costs more — while `context_window_options` lists every window
+ * the gateway will accept, the largest being the hard ceiling.
+ *
+ * Measured against the live gateway on 2026-10-25: a prompt of 946,206 tokens
+ * was served normally, and one of ~1,050,000 was refused with
+ * `invalid params, context window exceeds limit (2013)`. The ceiling is
+ * therefore the largest option, not `limit.context`.
+ *
+ * Declaring the default instead of the ceiling is not a cosmetic difference:
+ * the adapter compares the gateway's own token count against this number, so a
+ * conversation that runs past 512k is reported as a context overflow on every
+ * turn even though the gateway answers it perfectly well.
+ *
+ * @param raw - The upstream model entry.
+ * @param limit - The upstream `limit` block, already read.
+ * @returns The window to declare, in tokens.
+ */
+function readContextWindow(raw: Record<string, unknown>, limit: Record<string, unknown>): number {
+  const options = raw.context_window_options
+  if (Array.isArray(options)) {
+    const sizes = options.filter(
+      (value): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0,
+    )
+    if (sizes.length > 0) return Math.max(...sizes)
+  }
+  return typeof limit.context === 'number' ? limit.context : 200000
+}
+
 /** Read the fields the upstream sends, tolerating their absence. */
 function readModel(id: string, raw: Record<string, unknown>): CatalogModel {
   const limit = (raw.limit ?? {}) as Record<string, unknown>
   const modalities = (raw.modalities ?? {}) as Record<string, unknown>
   const input = Array.isArray(modalities.input) ? modalities.input.filter((m): m is string => typeof m === 'string') : ['text']
-  const contextWindow = typeof limit.context === 'number' ? limit.context : 200000
+  const contextWindow = readContextWindow(raw, limit)
   return {
     id,
     name: typeof raw.name === 'string' ? raw.name : id,

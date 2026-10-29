@@ -297,9 +297,16 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **No settings card is provided**. The plugin does not register a card on the DSH settings page; the interface it adds is a single pill in the composer tool row (**drawn only while this plugin's model is selected**) and a small card on the plugin page.
 - **The upstream APIs are non-public** and may stop working when MiniMax updates its client. If the balance API breaks, the pill shows "credits unavailable", which does not affect model traffic.
 - **Image input depends on the host's attachment service.** The catalog declares the `image` modality (`M3`, `M3.1-Flash`), but turning a durable attachment into request bytes is the host's job: without that service the plugin still loads and serves text, and only image requests are refused.
+- **The context window is declared as the gateway's real ceiling (1,000,000), not the 512,000 in the catalog.** Upstream's `limit.context` is the *default* window and the billing tier boundary (input above 512k costs more); the largest entry of `context_window_options` is the ceiling the gateway enforces. Measured on 2026-10-25: 946,206 tokens were served normally, 1,050,000 were refused (`invalid params, context window exceeds limit (2013)`). Declaring 512,000 meant every turn of a long conversation was reported as `pi-ai detected context overflow` — while the model had answered perfectly well and the reply was thrown away.
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.4 (2026-10-29)
+
+- **Fixed long conversations being reported as context overflow**: upstream's `limit.context` (512,000) is the *default* window and the billing tier boundary, while the ceiling the gateway enforces is the 1,000,000 in `context_window_options`. Declaring 512,000 meant that once a conversation crossed that line, *every* turn was reported as `pi-ai detected context overflow` — even though the model answered normally and the reply was discarded. The window is now declared as the ceiling the gateway actually enforces.
+- The built-in fallback roster (used when the catalog cannot be fetched) now declares 1,000,000 as well.
+- Four new cases pin the window parsing: the largest of `context_window_options` wins, upstream's `limit.context` is the fallback, a malformed option list is ignored, and the fallback roster does not claim 512k.
 
 ### 0.5.3 (2026-10-25)
 

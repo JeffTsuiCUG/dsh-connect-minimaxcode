@@ -145,6 +145,11 @@ declare const MINIMAXCODE_PROVIDER_ID = "minimaxcode";
  * when upstream retired `MiniMax-M2.7` and `MiniMax-M2.7-highspeed` and
  * promoted the model previously served anonymously (internally "space bunny")
  * as `MiniMax-M3.1-Flash`.
+ *
+ * The window is 1,000,000 rather than the 512,000 the upstream `limit` block
+ * reports: 512k is the billing tier boundary, and the gateway itself was
+ * measured serving 946,206 tokens before refusing ~1,050,000 with
+ * `invalid params, context window exceeds limit (2013)`.
  */
 declare const FALLBACK_MODELS: readonly CatalogModel[];
 /** Where the currently served list came from. */

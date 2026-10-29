@@ -74,6 +74,61 @@ describe('parseCatalog', () => {
     expect(parseCatalog(null)).toEqual([])
     expect(parseCatalog({ providers: 'nope' })).toEqual([])
   })
+
+  it('declares the ceiling the gateway enforces, not the billing tier', () => {
+    // Upstream's `limit.context` is the default window and the point where
+    // input starts costing more; `context_window_options` lists what the
+    // gateway will actually accept, and the largest one is the ceiling.
+    const models = parseCatalog({
+      providers: [{
+        providerId: 'minimax',
+        config: {
+          models: {
+            'MiniMax-M3.1-Flash': {
+              name: 'M3.1-Flash',
+              limit: { context: 512000, output: 128000 },
+              context_window_options: [512000, 1000000],
+              context_window_option_hints: { '1000000': 'higher_usage' },
+            },
+          },
+        },
+      }],
+    })
+    expect(models[0]!.contextWindow).toBe(1000000)
+  })
+
+  it('keeps the upstream window when no option is offered', () => {
+    const models = parseCatalog({
+      providers: [{
+        providerId: 'minimax',
+        config: { models: { 'MiniMax-M3': { name: 'M3', limit: { context: 512000 } } } },
+      }],
+    })
+    expect(models[0]!.contextWindow).toBe(512000)
+  })
+
+  it('ignores a malformed window option list', () => {
+    for (const options of [[], ['1000000'], [null], [0], [-1]]) {
+      const models = parseCatalog({
+        providers: [{
+          providerId: 'minimax',
+          config: {
+            models: {
+              'MiniMax-M3': { name: 'M3', limit: { context: 512000 }, context_window_options: options },
+            },
+          },
+        }],
+      })
+      expect(models[0]!.contextWindow).toBe(512000)
+    }
+  })
+
+  it('ships a built-in roster that declares the real ceiling', () => {
+    // The fallback list must not claim a window the gateway would refuse, nor
+    // one smaller than it accepts: a conversation past 512k used to be
+    // reported as an overflow on every turn.
+    for (const model of FALLBACK_MODELS) expect(model.contextWindow).toBe(1000000)
+  })
 })
 
 describe('MinimaxCatalog', () => {
