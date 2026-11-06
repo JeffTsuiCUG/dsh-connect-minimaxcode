@@ -92,6 +92,13 @@ interface StatusDocument {
     lastModel?: string
     requests: number
   }
+  rateLimit?: {
+    state: 'ok' | 'unavailable' | 'expired' | 'signed-out'
+    interval?: { usedPercent: number; startAtMs: number; resetAtMs: number }
+    weekly?: { usedPercent: number; startAtMs: number; resetAtMs: number }
+    updatedAtMs?: number
+    error?: string
+  }
   signin?: {
     state: 'ok' | 'unavailable'
     today?: { dayNo: number; points: number; status: number; claimable: boolean; claimed: boolean }
@@ -167,6 +174,9 @@ interface StatusDocument {
     signinAuto: '每天自动签到',
     signinClaim: '签到',
     claimableToday: '今日可签到',
+    usage5h: '5 小时限额',
+    usageWeek: '本周限额',
+    resetIn: '{duration}后重置',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -207,6 +217,9 @@ interface StatusDocument {
     signinAuto: 'Claim daily on its own',
     signinClaim: 'Claim',
     claimableToday: 'Claimable today',
+    usage5h: '5-hour limit',
+    usageWeek: 'Weekly limit',
+    resetIn: 'resets in {duration}',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -321,6 +334,35 @@ interface StatusDocument {
         )
       }
 
+      /**
+       * A countdown to a window reset, coarse on purpose: minutes below an
+       * hour, hours and minutes below a day, days and hours beyond. It is
+       * computed at render time, so it is as fresh as the last status read.
+       */
+      function countdown(resetAtMs: number): string {
+        const minutes = Math.max(0, Math.ceil((resetAtMs - Date.now()) / 60_000))
+        if (minutes < 60) return `${minutes}m`
+        if (minutes < 1_440) return `${Math.floor(minutes / 60)}h${minutes % 60}m`
+        return `${Math.floor(minutes / 1_440)}d${Math.floor((minutes % 1_440) / 60)}h`
+      }
+
+      /**
+       * The plan's two rolling usage windows, shared by the pill's detail and
+       * the page card.
+       *
+       * The percent sits on the right with the reset countdown in
+       * parentheses, and the window length is never stated: the server
+       * derives the edges, and the plan's terms have changed before.
+       */
+      function rateLimitBlock(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown {
+        if (rateLimit === undefined || rateLimit.state !== 'ok') return null
+        if (rateLimit.interval === undefined || rateLimit.weekly === undefined) return null
+        return h('div', { style: expiryBoxStyle, 'data-minimax-rate-limit': true },
+          row(t('usage5h'), `${rateLimit.interval.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.interval.resetAtMs) })})`),
+          row(t('usageWeek'), `${rateLimit.weekly.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.weekly.resetAtMs) })})`),
+        )
+      }
+
       /** The pill itself; the gate decides whether it is drawn at all. */
       function CreditPill(props: SlotProps) {
         const [status] = useStatus()
@@ -345,6 +387,7 @@ interface StatusDocument {
               ? row(t('consumed'), credits(credits_!.consumed, 3))
               : null,
             expiryBlock(t, credits_),
+            rateLimitBlock(t, status?.rateLimit),
             usage !== undefined
               ? h('div', { style: rowStyle },
                 h('span', null, t('tokens', { count: tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens) })),
@@ -548,6 +591,7 @@ interface StatusDocument {
           row(t('free'), credits(credits_!.free, 3)),
           row(t('purchased'), credits(credits_!.purchased, 3)),
           expiryBlock(t, credits_),
+          rateLimitBlock(t, status?.rateLimit),
           signinBlock(t, signin, refresh),
           h('div', { style: sectionTitleStyle }, t('lots')),
           (credits_!.upcoming ?? []).length === 0

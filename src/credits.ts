@@ -65,6 +65,9 @@ export const CREDIT_DETAILS_PATH = '/minimax-cloud/api/v1/credit/details'
 /** Per-model token usage summary (open platform). */
 export const USAGE_SUMMARY_PATH = '/backend/account/token_plan/usage_summary'
 
+/** Rate-limit window endpoint: the 5-hour and weekly usage the plan meters. */
+export const REMAINS_PERCENT_PATH = '/backend/account/token_plan/remains_percent'
+
 /** OAuth token endpoint. */
 export const TOKEN_PATH = '/oauth2/token'
 
@@ -470,6 +473,98 @@ export async function fetchCreditLots(
   return lots
 }
 
+/** One metered window: a span of time and how much of its allowance went. */
+export interface UsageWindow {
+  /** The share of the window's allowance already used, in percent. */
+  usedPercent: number
+  /** When the window opened, in milliseconds since the epoch. */
+  startAtMs: number
+  /** When the window closes and the allowance resets, in milliseconds since the epoch. */
+  resetAtMs: number
+}
+
+/** The two rolling windows the plan meters usage in. */
+export interface RateLimitWindows {
+  /** The short window (five hours on the plans seen so far). */
+  interval: UsageWindow
+  /** The weekly window (seven days on the plans seen so far). */
+  weekly: UsageWindow
+}
+
+/**
+ * Read the two rate-limit windows out of a remains-percent response.
+ *
+ * The upstream answers with one entry per metered group; the general one is
+ * the only one the plan meters today, and the first entry is used when it is
+ * absent. The percents arrive as strings ("19%"), and the counts arrive as -1
+ * when the plan does not meter by count, so only the percents and the window
+ * edges are read. The window length is derived from the entry's own endpoints
+ * rather than assumed to be five hours or seven days — the plan's terms have
+ * changed before, and the display should follow whatever the server says.
+ */
+export function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined {
+  if (typeof document !== 'object' || document === null) return undefined
+  const remains = (document as Record<string, unknown>).model_remains
+  if (!Array.isArray(remains) || remains.length === 0) return undefined
+  const entry = remains.find(
+    item => typeof item === 'object' && item !== null && (item as Record<string, unknown>).model_name === 'general',
+  ) ?? remains[0]
+  if (typeof entry !== 'object' || entry === null) return undefined
+  const record = entry as Record<string, unknown>
+  const interval = readWindow(
+    record.current_interval_used_percent,
+    record.start_time,
+    record.end_time,
+  )
+  const weekly = readWindow(
+    record.current_weekly_used_percent,
+    record.weekly_start_time,
+    record.weekly_end_time,
+  )
+  if (interval === undefined || weekly === undefined) return undefined
+  return { interval, weekly }
+}
+
+/** Assemble one window from its percent and edge fields; all must be present. */
+function readWindow(percent: unknown, startAtMs: unknown, resetAtMs: unknown): UsageWindow | undefined {
+  const usedPercent = parsePercent(percent)
+  const start = toNumber(startAtMs)
+  const reset = toNumber(resetAtMs)
+  if (usedPercent === undefined || start === undefined || reset === undefined) return undefined
+  return { usedPercent, startAtMs: start, resetAtMs: reset }
+}
+
+/** Read "19%" as 19; anything else is unreadable rather than zero. */
+function parsePercent(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined
+  const parsed = Number(value.replace(/%\s*$/, ''))
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+/**
+ * Fetch the plan's two rate-limit windows.
+ *
+ * The endpoint lives on the open-platform host, like the usage summary, and
+ * answers the same OAuth credential the membership endpoint takes. The JWT the
+ * model gateway accepts does not work here: this is an account endpoint.
+ *
+ * @returns The windows, or `undefined` when the response carries none.
+ */
+export async function fetchRateLimitWindows(
+  credential: OAuthCredential,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<RateLimitWindows | undefined> {
+  const url = `${MINIMAX_OPEN_HOSTS[region]}${REMAINS_PERCENT_PATH}?business=Agent&device_platform=desktop`
+  const response = await fetchImpl(url, {
+    headers: { accept: 'application/json', authorization: `Bearer ${credential.token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`rate-limit window request failed: HTTP ${response.status}`)
+  }
+  return parseRateLimitWindows(await response.json())
+}
+
 /** How many days of expiry the plugin calls "about to expire". */
 export const EXPIRING_WINDOW_DAYS = 7
 
@@ -527,6 +622,9 @@ export class MinimaxCredits {
   #expiry: ExpirySummary | undefined
   #ledgerAtMs: number | undefined
   #ledgerError: string | undefined
+  #rateLimit: RateLimitWindows | undefined
+  #rateLimitError: string | undefined
+  #rateLimitAtMs: number | undefined
 
   /** The balance as last read. */
   get snapshot(): CreditSnapshot | undefined {
@@ -558,12 +656,29 @@ export class MinimaxCredits {
     return this.#ledgerError
   }
 
+  /** The plan's rate-limit windows as last read. */
+  get rateLimit(): RateLimitWindows | undefined {
+    return this.#rateLimit
+  }
+
+  /** Why the windows could not be read, when they could not. */
+  get rateLimitError(): string | undefined {
+    return this.#rateLimitError
+  }
+
+  /** When the windows were last read. */
+  get rateLimitAtMs(): number | undefined {
+    return this.#rateLimitAtMs
+  }
+
   /**
    * Read the balance and record how much was consumed since the last read.
    *
    * The credit ledger is read alongside it, but a ledger that cannot be read
    * never hides the balance: the two come from different endpoints and only
-   * the balance is essential.
+   * the balance is essential. The rate-limit windows ride along under the
+   * same rule — they come from yet another endpoint, and none of the three
+   * takes the others down with it.
    *
    * @returns Whether the balance changed.
    */
@@ -592,6 +707,7 @@ export class MinimaxCredits {
       this.#error = error instanceof Error ? error.message : String(error)
     }
     await this.refreshLedger(credential, region, fetchImpl, now)
+    await this.refreshRateLimit(credential, region, fetchImpl, now)
     return changed
   }
 
@@ -616,6 +732,28 @@ export class MinimaxCredits {
       this.#ledgerError = undefined
     } catch (error) {
       this.#ledgerError = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  /**
+   * Read the plan's rate-limit windows.
+   *
+   * Same rule as the ledger: a failure is remembered but never thrown, and a
+   * window that cannot be read leaves the last one on display.
+   */
+  async refreshRateLimit(
+    credential: OAuthCredential,
+    region: MinimaxRegion,
+    fetchImpl: typeof fetch = fetch,
+    now = Date.now(),
+  ): Promise<void> {
+    try {
+      const windows = await fetchRateLimitWindows(credential, region, fetchImpl)
+      this.#rateLimit = windows
+      this.#rateLimitError = windows === undefined ? 'response carried no rate-limit windows' : undefined
+      this.#rateLimitAtMs = now
+    } catch (error) {
+      this.#rateLimitError = error instanceof Error ? error.message : String(error)
     }
   }
 }

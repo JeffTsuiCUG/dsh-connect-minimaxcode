@@ -208,6 +208,8 @@ declare class MinimaxCatalog {
 declare const MINIMAX_OAUTH_CLIENT_ID = "mcode-public";
 /** Membership endpoint: carries the credit summary. */
 declare const MEMBERSHIP_PATH = "/matrix/api/v1/commerce/get_membership_info";
+/** Rate-limit window endpoint: the 5-hour and weekly usage the plan meters. */
+declare const REMAINS_PERCENT_PATH = "/backend/account/token_plan/remains_percent";
 /** The OAuth credential the account endpoints accept. */
 interface OAuthCredential {
   /** The `mmoat_` bearer token. */
@@ -336,6 +338,44 @@ interface CreditLot {
   /** The upstream's kind of lot, when it says. */
   creditType?: number;
 }
+/** One metered window: a span of time and how much of its allowance went. */
+interface UsageWindow {
+  /** The share of the window's allowance already used, in percent. */
+  usedPercent: number;
+  /** When the window opened, in milliseconds since the epoch. */
+  startAtMs: number;
+  /** When the window closes and the allowance resets, in milliseconds since the epoch. */
+  resetAtMs: number;
+}
+/** The two rolling windows the plan meters usage in. */
+interface RateLimitWindows {
+  /** The short window (five hours on the plans seen so far). */
+  interval: UsageWindow;
+  /** The weekly window (seven days on the plans seen so far). */
+  weekly: UsageWindow;
+}
+/**
+ * Read the two rate-limit windows out of a remains-percent response.
+ *
+ * The upstream answers with one entry per metered group; the general one is
+ * the only one the plan meters today, and the first entry is used when it is
+ * absent. The percents arrive as strings ("19%"), and the counts arrive as -1
+ * when the plan does not meter by count, so only the percents and the window
+ * edges are read. The window length is derived from the entry's own endpoints
+ * rather than assumed to be five hours or seven days — the plan's terms have
+ * changed before, and the display should follow whatever the server says.
+ */
+declare function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined;
+/**
+ * Fetch the plan's two rate-limit windows.
+ *
+ * The endpoint lives on the open-platform host, like the usage summary, and
+ * answers the same OAuth credential the membership endpoint takes. The JWT the
+ * model gateway accepts does not work here: this is an account endpoint.
+ *
+ * @returns The windows, or `undefined` when the response carries none.
+ */
+declare function fetchRateLimitWindows(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<RateLimitWindows | undefined>;
 /** What the lots say about credits that are about to be lost. */
 interface ExpirySummary {
   /** Credits in lots that expire within {@link EXPIRING_WINDOW_DAYS} days. */
@@ -374,12 +414,20 @@ declare class MinimaxCredits {
   get ledgerAtMs(): number | undefined;
   /** Why the ledger could not be read, when it could not. */
   get ledgerError(): string | undefined;
+  /** The plan's rate-limit windows as last read. */
+  get rateLimit(): RateLimitWindows | undefined;
+  /** Why the windows could not be read, when they could not. */
+  get rateLimitError(): string | undefined;
+  /** When the windows were last read. */
+  get rateLimitAtMs(): number | undefined;
   /**
    * Read the balance and record how much was consumed since the last read.
    *
    * The credit ledger is read alongside it, but a ledger that cannot be read
    * never hides the balance: the two come from different endpoints and only
-   * the balance is essential.
+   * the balance is essential. The rate-limit windows ride along under the
+   * same rule — they come from yet another endpoint, and none of the three
+   * takes the others down with it.
    *
    * @returns Whether the balance changed.
    */
@@ -392,6 +440,13 @@ declare class MinimaxCredits {
    * take it down with it.
    */
   refreshLedger(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<void>;
+  /**
+   * Read the plan's rate-limit windows.
+   *
+   * Same rule as the ledger: a failure is remembered but never thrown, and a
+   * window that cannot be read leaves the last one on display.
+   */
+  refreshRateLimit(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<void>;
 }
 //#endregion
 //#region src/usage.d.ts
@@ -831,6 +886,27 @@ interface UsageStatus {
   /** How many requests were measured. */
   requests: number;
 }
+/** The plan's two rolling usage windows, as the card reads them. */
+interface RateLimitStatus {
+  /** Whether the windows could be read. */
+  state: 'ok' | 'unavailable' | 'expired' | 'signed-out';
+  /** The short window (five hours on the plans seen so far). */
+  interval?: {
+    usedPercent: number;
+    startAtMs: number;
+    resetAtMs: number;
+  };
+  /** The weekly window. */
+  weekly?: {
+    usedPercent: number;
+    startAtMs: number;
+    resetAtMs: number;
+  };
+  /** When the windows were read, in milliseconds since the epoch. */
+  updatedAtMs?: number;
+  /** Why the windows could not be read. */
+  error?: string;
+}
 /** What the card renders. */
 interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired';
@@ -853,6 +929,8 @@ interface StatusDocument {
   refreshing?: boolean;
   /** The account's credit balance, when it could be read. */
   credits?: CreditStatus;
+  /** The plan's rolling usage windows, when they could be read. */
+  rateLimit?: RateLimitStatus;
   /** What this host's requests have used. */
   usage?: UsageStatus;
   /** The daily check-in, when it could be read. */
@@ -879,6 +957,8 @@ interface StatusDeps {
   refreshing: boolean;
   /** The account's credit balance, when the account API could be reached. */
   credits?: CreditStatus;
+  /** The plan's rolling usage windows, when the open platform could be reached. */
+  rateLimit?: RateLimitStatus;
   /** What this host's requests have used. */
   usage?: UsageStatus;
   /** The daily check-in, when the account API could be reached. */
@@ -968,4 +1048,4 @@ declare const inject: string[];
  */
 declare function apply(ctx: Context): void;
 //#endregion
-export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PluginCredential, type PluginState, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };
+export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PluginCredential, type PluginState, REMAINS_PERCENT_PATH, type RateLimitWindows, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchRateLimitWindows, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parseRateLimitWindows, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };
