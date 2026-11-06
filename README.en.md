@@ -302,6 +302,11 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.5.5 (2026-11-06)
+
+- **New "rate-limit windows" readout**: reads the open platform's `GET /backend/account/token_plan/remains_percent` (found in the desktop app's own traffic, likewise undocumented) and shows the plan's **5-hour window** and **weekly window** with used percentages and a reset countdown. Window lengths are derived from the response's own edges, never hard-coded.
+- The endpoint belongs to the account domain and **accepts only the OAuth token** (desktop app or plugin sign-in); a JWT answers `1016 invalid api key`. The read rides the credits poller with independent failure handling.
+- Shown in the pill detail and the plugin page card; `tests/rate-limit.spec.ts` pins parsing, URL, failure handling and the polling wiring.
 ### 0.5.4 (2026-10-29)
 
 - **Fixed long conversations being reported as context overflow**: upstream's `limit.context` (512,000) is the *default* window and the billing tier boundary, while the ceiling the gateway enforces is the 1,000,000 in `context_window_options`. Declaring 512,000 meant that once a conversation crossed that line, *every* turn was reported as `pi-ai detected context overflow` — even though the model answered normally and the reply was discarded. The window is now declared as the ceiling the gateway actually enforces.
