@@ -176,7 +176,7 @@ interface StatusDocument {
     claimableToday: '今日可签到',
     usage5h: '5 小时限额',
     usageWeek: '本周限额',
-    resetIn: '{duration}后重置',
+    resetIn: '{duration}后',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -374,10 +374,24 @@ interface StatusDocument {
 
         const credits_ = status?.credits
         const usage = status?.usage
+        const rateLimit = status?.rateLimit
         const available = credits_?.state === 'ok' && credits_.total !== undefined
-        const label = available
+        const windows = rateLimit?.state === 'ok' && rateLimit.interval !== undefined && rateLimit.weekly !== undefined
+          ? { interval: rateLimit.interval, weekly: rateLimit.weekly }
+          : undefined
+        // A window that is used up means the plan cannot serve the next
+        // request right now, so the balance is the number worth seeing.
+        // Otherwise the pill leads with the 5-hour window — the one that
+        // gates the next request. No windows, the balance again: the pill
+        // never shows nothing just because one read failed.
+        const exhausted = windows !== undefined
+          && (windows.interval.usedPercent >= 100 || windows.weekly.usedPercent >= 100)
+        const balance = available
           ? t('balance', { total: credits(credits_!.total, 2) })
           : t(credits_?.state === 'expired' ? 'expired' : credits_?.state === 'signed-out' ? 'signedOut' : 'unavailable')
+        const label = windows === undefined || exhausted
+          ? balance
+          : `5h  ${windows.interval.usedPercent}%(${t('resetIn', { duration: countdown(windows.interval.resetAtMs) })})`
 
         const detail = available
           ? h('div', { style: detailStyle, 'data-minimax-credits-detail': true },

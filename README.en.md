@@ -79,6 +79,12 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 For the Web profile, replace `--profile desktop` with `--profile web`.
 
+> **Installing a locally modified clone**: do not pass a directory path to `dsh plugin add` — pnpm installs it as a link and nests dependency symlinks inside the plugin's own `node_modules`; the host's plugin sandbox gets `EPERM` stat-ing those links and the plugin fails to activate (`failed to import`). Pack a tarball first, then install the tarball so dependencies resolve in the profile root `node_modules` like a registry install:
+
+```bash
+pnpm pack
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+```
 > The desktop profile is owned exclusively by the Electron app. If the `dsh` command is not on your PATH, use the carrier CLI bundled with the DSH app (the path depends on the install location, for example `<DSH install dir>\resources\runtime\cli\bin\dsh.cmd`).
 
 After installing, the plugin hot-reloads, and the models then show up under the **MiniMax Code** group in the model picker.

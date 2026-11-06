@@ -85,6 +85,12 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 Web profile 把 `--profile desktop` 换成 `--profile web`。
 
+> **本地开发装自己改过的克隆**：不要把目录路径直接传给 `dsh plugin add`——pnpm 会以链接方式安装，把依赖的软链嵌进插件自己的 `node_modules`，宿主的插件沙箱 `stat` 这些链接会得到 `EPERM`，插件激活失败（`failed to import`）。先 `pnpm pack` 打成 tarball，再安装 tarball，依赖就会像 registry 安装一样解析在 profile 根 `node_modules`：
+
+```bash
+pnpm pack
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+```
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
 安装后插件会热加载，模型随后出现在模型选择器的 **MiniMax Code** 分组中。
