@@ -501,6 +501,10 @@ export interface RateLimitWindows {
  * edges are read. The window length is derived from the entry's own endpoints
  * rather than assumed to be five hours or seven days — the plan's terms have
  * changed before, and the display should follow whatever the server says.
+ *
+ * A window the server marks as unlimited (`current_*_status` of 3) carries no
+ * allowance to be a percentage of, so it produces no window at all: reporting
+ * "0%" of an unlimited quota would be a number nobody can act on.
  */
 export function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined {
   if (typeof document !== 'object' || document === null) return undefined
@@ -515,18 +519,33 @@ export function parseRateLimitWindows(document: unknown): RateLimitWindows | und
     record.current_interval_used_percent,
     record.start_time,
     record.end_time,
+    record.current_interval_status,
   )
   const weekly = readWindow(
     record.current_weekly_used_percent,
     record.weekly_start_time,
     record.weekly_end_time,
+    record.current_weekly_status,
   )
   if (interval === undefined || weekly === undefined) return undefined
   return { interval, weekly }
 }
 
+/**
+ * The status the upstream gives a window that is not limited at all.
+ *
+ * The desktop app reads it the same way: `isUnlimited: 3 === status`.
+ */
+const UNLIMITED_STATUS = 3
+
 /** Assemble one window from its percent and edge fields; all must be present. */
-function readWindow(percent: unknown, startAtMs: unknown, resetAtMs: unknown): UsageWindow | undefined {
+function readWindow(
+  percent: unknown,
+  startAtMs: unknown,
+  resetAtMs: unknown,
+  status: unknown,
+): UsageWindow | undefined {
+  if (status === UNLIMITED_STATUS) return undefined
   const usedPercent = parsePercent(percent)
   const start = toNumber(startAtMs)
   const reset = toNumber(resetAtMs)
@@ -534,8 +553,14 @@ function readWindow(percent: unknown, startAtMs: unknown, resetAtMs: unknown): U
   return { usedPercent, startAtMs: start, resetAtMs: reset }
 }
 
-/** Read "19%" as 19; anything else is unreadable rather than zero. */
+/**
+ * Read "19%" as 19, and a bare 19 as 19 as well.
+ *
+ * The desktop app parses both shapes, so both are accepted here: anything
+ * unreadable stays unreadable rather than becoming a zero.
+ */
 function parsePercent(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
   if (typeof value !== 'string') return undefined
   const parsed = Number(value.replace(/%\s*$/, ''))
   return Number.isFinite(parsed) ? parsed : undefined

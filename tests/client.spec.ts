@@ -333,9 +333,16 @@ describe('client bundle', () => {
     return JSON.stringify(renderDeep(harness, component!, props))
   }
 
-  const window = (usedPercent: number) => ({ usedPercent, startAtMs: 1, resetAtMs: Date.now() + 140 * 60_000 })
+  /**
+   * A metered window. Its length comes from its own edges, which is what the
+   * pill names it by — so the fixture's span is the label the pill shows.
+   */
+  const window = (usedPercent: number, durationMs = 5 * 60 * 60_000) => {
+    const start = Date.now()
+    return { usedPercent, startAtMs: start, resetAtMs: start + durationMs }
+  }
 
-  it('leads with the 5-hour window while nothing is used up', async () => {
+  it('leads with the short window while nothing is used up', async () => {
     const pill = await pillWithWindows({
       state: 'ok',
       interval: window(50),
@@ -346,7 +353,19 @@ describe('client bundle', () => {
     expect(pill).not.toContain('"balance')
   })
 
-  it('shows the balance once the 5-hour window is used up', async () => {
+  it('names the window by the length the server gives it', async () => {
+    // The plan's terms have changed before: a three-hour window must read
+    // "3h", not the five hours the plan meters today.
+    const pill = await pillWithWindows({
+      state: 'ok',
+      interval: window(50, 3 * 60 * 60_000),
+      weekly: window(29, 3 * 60 * 60_000),
+    })
+    expect(pill).toContain('3h')
+    expect(pill).not.toContain('5h')
+  })
+
+  it('shows the balance once the short window is used up', async () => {
     const pill = await pillWithWindows({
       state: 'ok',
       interval: window(100),

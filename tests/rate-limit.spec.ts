@@ -104,6 +104,22 @@ describe('parseRateLimitWindows', () => {
     expect(windows?.interval.usedPercent).toBe(19)
     expect(windows?.weekly.usedPercent).toBe(29)
   })
+
+  it('reads a percent that arrives as a number as well as a string', () => {
+    // The desktop app parses both shapes, so both are accepted here.
+    const windows = parseRateLimitWindows(windowsDocument({ current_interval_used_percent: 19 }))
+    expect(windows?.interval.usedPercent).toBe(19)
+  })
+
+  it('reports no window for a quota the server marks as unlimited', () => {
+    // The app reads the same field: `isUnlimited: 3 === status`. A window
+    // without an allowance has no percentage to report, and a "0%" of an
+    // unlimited quota is a number nobody can act on.
+    expect(parseRateLimitWindows(windowsDocument({ current_interval_status: 3 }))).toBeUndefined()
+    expect(parseRateLimitWindows(windowsDocument({ current_weekly_status: 3 }))).toBeUndefined()
+    // A window that is merely metered (status 1) is still read.
+    expect(parseRateLimitWindows(windowsDocument({ current_interval_status: 1 }))?.interval.usedPercent).toBe(19)
+  })
 })
 
 describe('fetchRateLimitWindows', () => {

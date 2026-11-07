@@ -174,8 +174,7 @@ interface StatusDocument {
     signinAuto: '每天自动签到',
     signinClaim: '签到',
     claimableToday: '今日可签到',
-    usage5h: '5h限额',
-    usageWeek: '周限额',
+    usageWindow: '{duration}限额',
     resetIn: '{duration}后',
   }
   const en: Record<string, string> = {
@@ -217,8 +216,7 @@ interface StatusDocument {
     signinAuto: 'Claim daily on its own',
     signinClaim: 'Claim',
     claimableToday: 'Claimable today',
-    usage5h: '5h limit',
-    usageWeek: 'Week limit',
+    usageWindow: '{duration} limit',
     resetIn: 'resets in {duration}',
   }
 
@@ -347,19 +345,38 @@ interface StatusDocument {
       }
 
       /**
+       * The length of a window, as the server defines it.
+       *
+       * The window's own edges give the length, so the label follows the plan
+       * instead of the plan's terms today: five hours today reads "5h", and a
+       * plan that moved to a three-hour window reads "3h" without a code
+       * change. Only the word around it is translated.
+       */
+      function windowLabel(window: { startAtMs: number; resetAtMs: number }): string {
+        const minutes = Math.max(1, Math.round((window.resetAtMs - window.startAtMs) / 60_000))
+        if (minutes >= 1_440) return `${Math.round(minutes / 1_440)}d`
+        if (minutes >= 60) {
+          const hours = minutes / 60
+          return Number.isInteger(hours) ? `${hours}h` : `${Math.floor(hours)}h${minutes % 60}m`
+        }
+        return `${minutes}m`
+      }
+
+      /**
        * The plan's two rolling usage windows, shared by the pill's detail and
        * the page card.
        *
        * The percent sits on the right with the reset countdown in
-       * parentheses, and the window length is never stated: the server
-       * derives the edges, and the plan's terms have changed before.
+       * parentheses, and the window length is derived from the window itself
+       * rather than written into the label: the plan's terms have changed
+       * before, and the display should follow whatever the server says.
        */
       function rateLimitBlock(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown {
         if (rateLimit === undefined || rateLimit.state !== 'ok') return null
         if (rateLimit.interval === undefined || rateLimit.weekly === undefined) return null
         return h('div', { style: expiryBoxStyle, 'data-minimax-rate-limit': true },
-          row(t('usage5h'), `${rateLimit.interval.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.interval.resetAtMs) })})`),
-          row(t('usageWeek'), `${rateLimit.weekly.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.weekly.resetAtMs) })})`),
+          row(t('usageWindow', { duration: windowLabel(rateLimit.interval) }), `${rateLimit.interval.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.interval.resetAtMs) })})`),
+          row(t('usageWindow', { duration: windowLabel(rateLimit.weekly) }), `${rateLimit.weekly.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.weekly.resetAtMs) })})`),
         )
       }
 
@@ -381,9 +398,10 @@ interface StatusDocument {
           : undefined
         // A window that is used up means the plan cannot serve the next
         // request right now, so the balance is the number worth seeing.
-        // Otherwise the pill leads with the 5-hour window — the one that
-        // gates the next request. No windows, the balance again: the pill
-        // never shows nothing just because one read failed.
+        // Otherwise the pill leads with the short window — the one that gates
+        // the next request — named by the length the server gives it. No
+        // windows, the balance again: the pill never shows nothing just
+        // because one read failed.
         const exhausted = windows !== undefined
           && (windows.interval.usedPercent >= 100 || windows.weekly.usedPercent >= 100)
         const balance = available
@@ -391,7 +409,7 @@ interface StatusDocument {
           : t(credits_?.state === 'expired' ? 'expired' : credits_?.state === 'signed-out' ? 'signedOut' : 'unavailable')
         const label = windows === undefined || exhausted
           ? balance
-          : `5h  ${windows.interval.usedPercent}%(${t('resetIn', { duration: countdown(windows.interval.resetAtMs) })})`
+          : `${windowLabel(windows.interval)}  ${windows.interval.usedPercent}%(${t('resetIn', { duration: countdown(windows.interval.resetAtMs) })})`
 
         const detail = available
           ? h('div', { style: detailStyle, 'data-minimax-credits-detail': true },

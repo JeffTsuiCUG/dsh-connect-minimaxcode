@@ -289,9 +289,9 @@ GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page_number=1&p
 
   > 官方价目表没有单列**缓存写入**（`cache_creation_input_tokens`）的单价，因此插件只统计它的 token 数、**不折算金额**，以免给出一个没有公开依据的数字。
 
-### 限额窗口（5 小时 / 每周）
+### 限额窗口（套餐的两个滚动窗口）
 
-套餐用量按两个滚动窗口计量，插件会显示各窗口的已用百分比与重置倒计时：
+套餐用量按两个滚动窗口计量（当前套餐为 5 小时与 7 天），插件会显示各窗口的已用百分比与重置倒计时：
 
 ```
 GET https://www.minimaxi.com/backend/account/token_plan/remains_percent?business=Agent&device_platform=desktop
@@ -310,7 +310,8 @@ Authorization: Bearer <OAuth 令牌>
 
 几点实测结论：
 
-- **窗口时长不写死**：从响应自身的起止字段推导（实测恰为 5 小时与 7 天），套餐条款变了显示会跟着变
+- **窗口时长不写死**：从响应自身的起止字段推导（实测恰为 5 小时与 7 天），套餐条款变了显示会跟着变 —— 胶囊与详情行上的窗口名（`5h`、`7d`）也是这么来的，不是写死的字面量
+- **无限量的窗口不报百分比**：上游用 `current_*_status` 标出没有额度的窗口（桌面 App 读作 `isUnlimited: 3 === status`），这类窗口不参与显示，避免出现「0%」这种没人能据此行动的读数
 - **该接口在开放平台域**（`www.minimaxi.com`），只认 OAuth 令牌；JWT 打它返回 `1016 invalid api key`
 - **接口异常时其余显示不受影响**：限额读不到，胶囊与卡片仍显示余额、签到与本机用量
 - 上游还发 `current_*_count` 计数字段（无计数制时为 `-1`），插件只读百分比与起止时刻
@@ -339,11 +340,13 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
-### 0.5.5（2026-11-06）
+### 0.5.5（2026-11-07）
 
 - **新增「限额窗口」显示**：读取开放平台的 `GET /backend/account/token_plan/remains_percent`（该接口来自桌面 App 每天真实调用的日志，同样未在官方文档中公开），展示套餐的**5 小时窗口**与**每周窗口**的已用百分比与重置倒计时。窗口时长从响应自身的起止字段推导，不写死 5 小时或 7 天——套餐条款变过不止一次，显示应跟随服务端所说。
 - 该接口属于账户域，**只认 OAuth 令牌**（桌面 App 登录态或插件自登录均可）；JWT 打它返回 `1016 invalid api key`。读取挂在积分轮询上，独立容错：限额读不到不影响余额显示，反之亦然。
 - 显示位置：胶囊详情与插件页卡片各两行；新增 `tests/rate-limit.spec.ts` 钉住解析、URL、容错与轮询接线。
+- 窗口名跟随服务端：胶囊主标签与详情行上的窗口长度（`5h`、`7d`）从响应的起止字段推导，而不是写死 —— 解析层早已「不写死窗口长度」，显示层此前却写着「5h」，两处现在一致。
+- 无限量窗口不报百分比：上游用 `current_*_status` 标出没有额度的窗口，这类窗口不参与显示，避免出现没人能据此行动的「0%」。
 ### 0.5.4（2026-10-29）
 
 - **修复长会话被误判为「上下文溢出」**：上游 `limit.context`（512,000）是**默认档位与计费分界**，网关实际执行的上限是 `context_window_options` 里的 1,000,000。此前按 512,000 声明，会话一旦超过这条线，**每一轮**都会被判定为 `pi-ai detected context overflow` —— 而模型其实正常答了，回复却被丢弃。现在按网关的真实上限声明窗口。
@@ -504,6 +507,7 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 ## 贡献者
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** —— 提出了插件页图标与中英文文案的建议（[#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)）。这条建议促成了 0.5.2：插件页有了自己的 SVG 图标，标题与简介有了中英两版，界面文案也开始跟随宿主语言。
+- **[azsora](https://github.com/azsora)** —— 从桌面 App 的实际调用里找出了套餐的**限额窗口接口**，并把 5 小时与每周两个窗口的用量接进了积分胶囊与插件页卡片（[#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)）：窗口时长从响应自身的起止字段推导，不写死。该功能成为 0.5.5。
 - **[qzz19970504](https://github.com/qzz19970504)** —— 定位并修复了「发图必然失败」的接线缺口（[#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)）：模型目录声明了 `image` 模态，但适配器没有把宿主的持久化附件服务接上，导致带图请求被 pi-ai 在发出前拒掉。该修复成为 0.5.3。
 - 插件作者：**[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 

@@ -364,6 +364,10 @@ interface RateLimitWindows {
  * edges are read. The window length is derived from the entry's own endpoints
  * rather than assumed to be five hours or seven days — the plan's terms have
  * changed before, and the display should follow whatever the server says.
+ *
+ * A window the server marks as unlimited (`current_*_status` of 3) carries no
+ * allowance to be a percentage of, so it produces no window at all: reporting
+ * "0%" of an unlimited quota would be a number nobody can act on.
  */
 declare function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined;
 /**
