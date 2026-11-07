@@ -79,6 +79,12 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 For the Web profile, replace `--profile desktop` with `--profile web`.
 
+> **Installing a locally modified clone**: do not pass a directory path to `dsh plugin add` — pnpm installs it as a link and nests dependency symlinks inside the plugin's own `node_modules`; the host's plugin sandbox gets `EPERM` stat-ing those links and the plugin fails to activate (`failed to import`). Pack a tarball first, then install the tarball so dependencies resolve in the profile root `node_modules` like a registry install:
+
+```bash
+pnpm pack
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+```
 > The desktop profile is owned exclusively by the Electron app. If the `dsh` command is not on your PATH, use the carrier CLI bundled with the DSH app (the path depends on the install location, for example `<DSH install dir>\resources\runtime\cli\bin\dsh.cmd`).
 
 After installing, the plugin hot-reloads, and the models then show up under the **MiniMax Code** group in the model picker.
@@ -302,6 +308,11 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.5.5 (2026-11-06)
+
+- **New "rate-limit windows" readout**: reads the open platform's `GET /backend/account/token_plan/remains_percent` (found in the desktop app's own traffic, likewise undocumented) and shows the plan's **5-hour window** and **weekly window** with used percentages and a reset countdown. Window lengths are derived from the response's own edges, never hard-coded.
+- The endpoint belongs to the account domain and **accepts only the OAuth token** (desktop app or plugin sign-in); a JWT answers `1016 invalid api key`. The read rides the credits poller with independent failure handling.
+- Shown in the pill detail and the plugin page card; `tests/rate-limit.spec.ts` pins parsing, URL, failure handling and the polling wiring.
 ### 0.5.4 (2026-10-29)
 
 - **Fixed long conversations being reported as context overflow**: upstream's `limit.context` (512,000) is the *default* window and the billing tier boundary, while the ceiling the gateway enforces is the 1,000,000 in `context_window_options`. Declaring 512,000 meant that once a conversation crossed that line, *every* turn was reported as `pi-ai detected context overflow` — even though the model answered normally and the reply was discarded. The window is now declared as the ceiling the gateway actually enforces.

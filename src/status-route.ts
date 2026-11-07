@@ -117,6 +117,20 @@ export interface UsageStatus {
   requests: number
 }
 
+/** The plan's two rolling usage windows, as the card reads them. */
+export interface RateLimitStatus {
+  /** Whether the windows could be read. */
+  state: 'ok' | 'unavailable' | 'expired' | 'signed-out'
+  /** The short window (five hours on the plans seen so far). */
+  interval?: { usedPercent: number; startAtMs: number; resetAtMs: number }
+  /** The weekly window. */
+  weekly?: { usedPercent: number; startAtMs: number; resetAtMs: number }
+  /** When the windows were read, in milliseconds since the epoch. */
+  updatedAtMs?: number
+  /** Why the windows could not be read. */
+  error?: string
+}
+
 /** What the card renders. */
 export interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired'
@@ -135,6 +149,8 @@ export interface StatusDocument {
   refreshing?: boolean
   /** The account's credit balance, when it could be read. */
   credits?: CreditStatus
+  /** The plan's rolling usage windows, when they could be read. */
+  rateLimit?: RateLimitStatus
   /** What this host's requests have used. */
   usage?: UsageStatus
   /** The daily check-in, when it could be read. */
@@ -158,6 +174,8 @@ export interface StatusDeps {
   refreshing: boolean
   /** The account's credit balance, when the account API could be reached. */
   credits?: CreditStatus
+  /** The plan's rolling usage windows, when the open platform could be reached. */
+  rateLimit?: RateLimitStatus
   /** What this host's requests have used. */
   usage?: UsageStatus
   /** The daily check-in, when the account API could be reached. */
@@ -190,6 +208,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     models: deps.models,
     refreshing: deps.refreshing,
     ...deps.credits === undefined ? {} : { credits: deps.credits },
+    ...deps.rateLimit === undefined ? {} : { rateLimit: deps.rateLimit },
     ...deps.usage === undefined ? {} : { usage: deps.usage },
     ...deps.signin === undefined ? {} : { signin: deps.signin },
     ...deps.login === undefined ? {} : { login: deps.login },

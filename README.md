@@ -85,6 +85,12 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 Web profile 把 `--profile desktop` 换成 `--profile web`。
 
+> **本地开发装自己改过的克隆**：不要把目录路径直接传给 `dsh plugin add`——pnpm 会以链接方式安装，把依赖的软链嵌进插件自己的 `node_modules`，宿主的插件沙箱 `stat` 这些链接会得到 `EPERM`，插件激活失败（`failed to import`）。先 `pnpm pack` 打成 tarball，再安装 tarball，依赖就会像 registry 安装一样解析在 profile 根 `node_modules`：
+
+```bash
+pnpm pack
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+```
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
 安装后插件会热加载，模型随后出现在模型选择器的 **MiniMax Code** 分组中。
@@ -283,6 +289,31 @@ GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page_number=1&p
 
   > 官方价目表没有单列**缓存写入**（`cache_creation_input_tokens`）的单价，因此插件只统计它的 token 数、**不折算金额**，以免给出一个没有公开依据的数字。
 
+### 限额窗口（5 小时 / 每周）
+
+套餐用量按两个滚动窗口计量，插件会显示各窗口的已用百分比与重置倒计时：
+
+```
+GET https://www.minimaxi.com/backend/account/token_plan/remains_percent?business=Agent&device_platform=desktop
+Authorization: Bearer <OAuth 令牌>
+```
+
+```json
+"model_remains": [{
+  "model_name": "general",
+  "start_time": 1793882204091, "end_time": 1793900204091,   // 差值 = 5 小时
+  "current_interval_used_percent": "19%",
+  "weekly_start_time": 1793783898054, "weekly_end_time": 1794388698054,  // 差值 = 7 天
+  "current_weekly_used_percent": "29%"
+}]
+```
+
+几点实测结论：
+
+- **窗口时长不写死**：从响应自身的起止字段推导（实测恰为 5 小时与 7 天），套餐条款变了显示会跟着变
+- **该接口在开放平台域**（`www.minimaxi.com`），只认 OAuth 令牌；JWT 打它返回 `1016 invalid api key`
+- **接口异常时其余显示不受影响**：限额读不到，胶囊与卡片仍显示余额、签到与本机用量
+- 上游还发 `current_*_count` 计数字段（无计数制时为 `-1`），插件只读百分比与起止时刻
 ### 关于续期
 
 OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自己的令牌已过期时**才用 App 已存的 refresh token 续一次，并把轮换后的新令牌按客户端**原格式原子写回**同一个文件（`generation` 保持不变），因此桌面 App 的登录态不受影响。插件不会发起登录、不会登出、也不会调用任何付费/订阅类接口。
@@ -308,6 +339,11 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
+### 0.5.5（2026-11-06）
+
+- **新增「限额窗口」显示**：读取开放平台的 `GET /backend/account/token_plan/remains_percent`（该接口来自桌面 App 每天真实调用的日志，同样未在官方文档中公开），展示套餐的**5 小时窗口**与**每周窗口**的已用百分比与重置倒计时。窗口时长从响应自身的起止字段推导，不写死 5 小时或 7 天——套餐条款变过不止一次，显示应跟随服务端所说。
+- 该接口属于账户域，**只认 OAuth 令牌**（桌面 App 登录态或插件自登录均可）；JWT 打它返回 `1016 invalid api key`。读取挂在积分轮询上，独立容错：限额读不到不影响余额显示，反之亦然。
+- 显示位置：胶囊详情与插件页卡片各两行；新增 `tests/rate-limit.spec.ts` 钉住解析、URL、容错与轮询接线。
 ### 0.5.4（2026-10-29）
 
 - **修复长会话被误判为「上下文溢出」**：上游 `limit.context`（512,000）是**默认档位与计费分界**，网关实际执行的上限是 `context_window_options` 里的 1,000,000。此前按 512,000 声明，会话一旦超过这条线，**每一轮**都会被判定为 `pi-ai detected context overflow` —— 而模型其实正常答了，回复却被丢弃。现在按网关的真实上限声明窗口。

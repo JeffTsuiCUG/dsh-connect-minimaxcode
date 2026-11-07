@@ -55,6 +55,20 @@ describe('statusDocument', () => {
     expect(doc.models).toHaveLength(1)
   })
 
+  it('carries the rate-limit windows when they were read', () => {
+    const doc = statusDocument(base({
+      rateLimit: {
+        state: 'ok',
+        interval: { usedPercent: 19, startAtMs: 1, resetAtMs: 2 },
+        weekly: { usedPercent: 29, startAtMs: 3, resetAtMs: 4 },
+        updatedAtMs: 5,
+      },
+    }))
+    expect(doc.rateLimit?.state).toBe('ok')
+    expect(doc.rateLimit?.interval?.usedPercent).toBe(19)
+    expect(doc.rateLimit?.weekly?.usedPercent).toBe(29)
+  })
+
   it('never carries a token', () => {
     const doc = JSON.stringify(statusDocument(base()))
     expect(doc).not.toMatch(/eyJ/)

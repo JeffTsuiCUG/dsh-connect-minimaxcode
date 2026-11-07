@@ -111,13 +111,13 @@ interface Loaded {
 }
 
 /** Load the built artifact the way the host's loader does. */
-function loadClient(): Loaded {
+function loadClient(status: unknown = STATUS): Loaded {
   const source = readFileSync(CLIENT_PATH, 'utf8')
   const loaded: Loaded = { registrations: [], slotNames: [], slots: [], fetchCount: 0 }
   const sandbox: Record<string, unknown> = {
     fetch: async () => {
       loaded.fetchCount += 1
-      return { ok: true, json: async () => STATUS }
+      return { ok: true, json: async () => status }
     },
     setInterval: () => 0,
     clearInterval: () => {},
@@ -304,6 +304,71 @@ describe('client bundle', () => {
     expect(second).toContain('balance')
     // The amount is grouped for the reader, so the digits are matched loosely.
     expect(second).toMatch(/11[,.]?326[.,]88/)
+  })
+
+  /**
+   * Render the pill once the status route has answered, with the given
+   * rate-limit windows riding on the shared status fixture.
+   */
+  async function pillWithWindows(rateLimit: unknown): Promise<string> {
+    const loaded = loadClient({ ...STATUS, rateLimit })
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    let component: ((props: unknown) => unknown) | undefined
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.name === 'conversation.input.left') component = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const props = { t: (key: string, params?: Record<string, unknown>) => `${key}:${JSON.stringify(params ?? {})}` }
+    // The first render starts the fetch; the second one sees the answer.
+    renderDeep(harness, component!, props)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    return JSON.stringify(renderDeep(harness, component!, props))
+  }
+
+  const window = (usedPercent: number) => ({ usedPercent, startAtMs: 1, resetAtMs: Date.now() + 140 * 60_000 })
+
+  it('leads with the 5-hour window while nothing is used up', async () => {
+    const pill = await pillWithWindows({
+      state: 'ok',
+      interval: window(50),
+      weekly: window(29),
+    })
+    expect(pill).toContain('5h')
+    expect(pill).toContain('50%')
+    expect(pill).not.toContain('"balance')
+  })
+
+  it('shows the balance once the 5-hour window is used up', async () => {
+    const pill = await pillWithWindows({
+      state: 'ok',
+      interval: window(100),
+      weekly: window(29),
+    })
+    expect(pill).toContain('"balance')
+    expect(pill).not.toContain('5h  100%')
+  })
+
+  it('shows the balance once the weekly window is used up', async () => {
+    const pill = await pillWithWindows({
+      state: 'ok',
+      interval: window(50),
+      weekly: window(100),
+    })
+    expect(pill).toContain('"balance')
+  })
+
+  it('falls back to the balance when no windows were read', async () => {
+    const pill = await pillWithWindows({ state: 'unavailable' })
+    expect(pill).toContain('"balance')
+    expect(pill).not.toContain('5h')
   })
 
   /** The registered readout component (the tool-row seat), bound to the test's harness. */

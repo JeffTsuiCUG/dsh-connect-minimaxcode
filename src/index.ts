@@ -24,7 +24,7 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
 import {
   credentialNeedsRefresh,
@@ -52,16 +52,20 @@ export {
   MinimaxCredits,
   ensureOAuthCredential,
   fetchCreditSummary,
+  fetchRateLimitWindows,
   parseCreditSummary,
   parseOAuthDocument,
+  parseRateLimitWindows,
   readOAuthCredential,
   refreshOAuthCredential,
   writeOAuthCredential,
   MEMBERSHIP_PATH,
   MINIMAX_OAUTH_CLIENT_ID,
+  REMAINS_PERCENT_PATH,
   type CreditSummary,
   type OAuthCredential,
   type OAuthState,
+  type RateLimitWindows,
 } from './credits.ts'
 export { EMPTY_USAGE, MODEL_PRICES, UsageMeter, estimateCny, priceFor, type ModelUsage } from './usage.ts'
 export {
@@ -401,6 +405,23 @@ function apply(ctx: Context) {
     }
   }
 
+  /** The plan's rolling usage windows as the card reads them. */
+  const buildRateLimitStatus = (): RateLimitStatus => {
+    if (creditState === 'signed-out' || creditState === 'expired') {
+      return { state: creditState }
+    }
+    const windows = credits.rateLimit
+    if (windows === undefined) {
+      return { state: 'unavailable', ...credits.rateLimitError === undefined ? {} : { error: credits.rateLimitError } }
+    }
+    return {
+      state: 'ok',
+      interval: windows.interval,
+      weekly: windows.weekly,
+      ...credits.rateLimitAtMs === undefined ? {} : { updatedAtMs: credits.rateLimitAtMs },
+    }
+  }
+
   /** What this host's own requests have used. */
   const buildUsageStatus = (): UsageStatus => {
     const totals = meter.totals()
@@ -529,6 +550,7 @@ function apply(ctx: Context) {
       models: catalog.current().map(({ id, name: modelName, contextWindow }) => ({ id, name: modelName, contextWindow })),
       refreshing,
       credits: buildCreditStatus(),
+      rateLimit: buildRateLimitStatus(),
       usage: buildUsageStatus(),
       signin: buildSigninStatus(),
       login: buildLoginStatus(),
