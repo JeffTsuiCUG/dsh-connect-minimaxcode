@@ -174,8 +174,8 @@ interface StatusDocument {
     signinAuto: '每天自动签到',
     signinClaim: '签到',
     claimableToday: '今日可签到',
-    usage5h: '5 小时限额',
-    usageWeek: '本周限额',
+    usage5h: '5h限额',
+    usageWeek: '周限额',
     resetIn: '{duration}后',
   }
   const en: Record<string, string> = {
@@ -217,8 +217,8 @@ interface StatusDocument {
     signinAuto: 'Claim daily on its own',
     signinClaim: 'Claim',
     claimableToday: 'Claimable today',
-    usage5h: '5-hour limit',
-    usageWeek: 'Weekly limit',
+    usage5h: '5h limit',
+    usageWeek: 'Week limit',
     resetIn: 'resets in {duration}',
   }
 
