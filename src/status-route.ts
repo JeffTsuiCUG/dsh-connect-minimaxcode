@@ -189,6 +189,8 @@ const HINTS: Record<string, string> = {
   'not-signed-in': 'MiniMax Code 尚未登录。请在 MiniMax Code 桌面 App 中登录后重启 DSH。',
   unreadable: '登录信息文件无法读取。请确认 MiniMax Code 仍处于登录状态。',
   malformed: '登录令牌格式无法解析。请在 MiniMax Code 中重新登录后重启 DSH。',
+  'credential-revoked': '登录凭据已被服务器撤销，模型请求无法通过。请点击下方登录按钮重新登录 MiniMax Code。',
+  'credential-expired': '登录凭据已过期。请点击下方登录按钮重新登录 MiniMax Code。',
 }
 
 /**
@@ -218,7 +220,9 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
       ...base,
       expiry: 'expired',
       daysRemaining: 0,
-      hint: '登录令牌已过期。请打开并登录 MiniMax Code 桌面 App 以获取新令牌，然后重启 DSH。',
+      // A plugin credential is renewed from the card itself, so its remedy
+      // differs from the desktop app's; a bare expiry keeps the app's advice.
+      hint: HINTS[auth.reason ?? ''] ?? '登录令牌已过期。请打开并登录 MiniMax Code 桌面 App 以获取新令牌，然后重启 DSH。',
     }
   }
   if (auth.state === 'signed-out') {

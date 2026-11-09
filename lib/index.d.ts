@@ -611,6 +611,8 @@ declare function pluginStatePath(env?: NodeJS.ProcessEnv): string;
 declare function readPluginCredential(env?: NodeJS.ProcessEnv): Promise<PluginCredential | undefined>;
 /** Write the plugin's own credential. */
 declare function writePluginCredential(credential: PluginCredential, env?: NodeJS.ProcessEnv): Promise<void>;
+/** Remove the plugin's own credential, which is what signing out means. */
+declare function deletePluginCredential(env?: NodeJS.ProcessEnv): Promise<void>;
 /** Read the plugin's own state. */
 declare function readPluginState(env?: NodeJS.ProcessEnv): Promise<PluginState>;
 /** Write the plugin's own state. */
@@ -1037,7 +1039,6 @@ interface AdapterBundle {
 declare function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle;
 //#endregion
 //#region src/index.d.ts
-/** Loader entry name; also the id the bundle patch inserts. */
 declare const name = "dsh-connect-minimaxcode";
 /** Services this plugin needs before it can serve anything. */
 declare const inject: string[];
@@ -1052,4 +1053,4 @@ declare const inject: string[];
  */
 declare function apply(ctx: Context): void;
 //#endregion
-export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PluginCredential, type PluginState, REMAINS_PERCENT_PATH, type RateLimitWindows, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchRateLimitWindows, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parseRateLimitWindows, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };
+export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PluginCredential, type PluginState, REMAINS_PERCENT_PATH, type RateLimitWindows, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, deletePluginCredential, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchRateLimitWindows, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parseRateLimitWindows, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };

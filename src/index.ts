@@ -24,15 +24,17 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
 import {
   credentialNeedsRefresh,
+  deletePluginCredential,
   readPluginCredential,
   readPluginState,
   toOAuthCredential,
   writePluginCredential,
   writePluginState,
+  type PluginCredential,
   type PluginState,
 } from './credentials.ts'
 import { pollDeviceLogin, refreshPluginCredential, startDeviceLogin } from './login.ts'
@@ -71,6 +73,7 @@ export { EMPTY_USAGE, MODEL_PRICES, UsageMeter, estimateCny, priceFor, type Mode
 export {
   PLUGIN_CREDENTIAL_FILENAME,
   PLUGIN_STATE_FILENAME,
+  deletePluginCredential,
   dshHome,
   pluginCredentialPath,
   pluginStatePath,
@@ -129,6 +132,29 @@ export type { StatusDocument } from './status-route.ts'
 export { MINIMAX_STREAM_IDLE_TIMEOUT_MS, createMinimaxCodeAdapter } from './adapter.ts'
 
 /** Loader entry name; also the id the bundle patch inserts. */
+/**
+ * Whether a message says the server refused the credential itself.
+ *
+ * The account and catalog endpoints answer a revoked or unknown bearer with
+ * `401`, and the only place that surfaces is the message the request layer
+ * built. Matching the status code rather than the wording keeps this working
+ * whatever language the message is written in.
+ */
+const isUnauthorized = (message: string | undefined): boolean =>
+  message !== undefined && /\bHTTP 401\b/.test(message)
+
+/**
+ * Whether a failed refresh means the credential can never be used again.
+ *
+ * The authorization server answers a revoked or already-spent refresh token
+ * with `400`/`401`, and a credential that carries no refresh token can never
+ * be renewed at all. Both are final. A `5xx` or a dropped connection is not:
+ * throwing the credential away over a bad minute upstream would sign the
+ * person out for nothing.
+ */
+const isRefreshRefused = (message: string): boolean =>
+  message.includes('没有可用于续期的 refresh token') || /\bHTTP (400|401)\b/.test(message)
+
 const name = 'dsh-connect-minimaxcode'
 
 /** Services this plugin needs before it can serve anything. */
@@ -197,15 +223,52 @@ function apply(ctx: Context) {
   let loginSource: 'plugin' | 'desktop-app' | undefined
   /** Whether a device login is waiting to be authorized. */
   let loginPending = false
+  /** Whether the server refused the plugin's own credential. */
+  let revokedByServer = false
+
+  /**
+   * Give up on the plugin's own credential after the server refused it.
+   *
+   * A revoked token keeps its expiry date, so every later call would send the
+   * same dead token and fail the same way. The only way back is a new sign-in,
+   * so the credential is deleted, the cached views of the account it belonged
+   * to are dropped, and the card is left asking for one.
+   */
+  const revokePluginCredential = async (): Promise<void> => {
+    await deletePluginCredential()
+    if (pluginState.deviceLogin !== undefined) {
+      pluginState = { ...pluginState, deviceLogin: undefined }
+      await writePluginState(pluginState)
+    }
+    revokedByServer = true
+    credential = undefined
+    modelToken = undefined
+    loginSource = undefined
+    loginPending = false
+    creditState = 'signed-out'
+    signinPanel = undefined
+    signinClaim = undefined
+    signinError = undefined
+    catalog.invalidate()
+    // Throttled rather than immediate: the refusal is already known, and a new
+    // credential is what should change these reads, not another retry.
+    lastCreditAtMs = Date.now()
+    lastSigninAtMs = Date.now()
+    lastCatalogAtMs = 0
+  }
 
   /**
    * The credential the model gateway is called with.
    *
    * The plugin's own sign-in comes first: it is the credential the person
    * chose, and on a machine where the desktop app was never installed it is
-   * the only one there is. The desktop app's token is the fallback, and the
-   * two are interchangeable as far as the gateway is concerned — it accepts
-   * either bearer.
+   * the only one there is.
+   *
+   * The desktop app's OAuth grant is next, and it is not a mere fallback: it
+   * is the credential a current install actually holds. Its `mmoat_` bearer is
+   * what the gateway accepts, while the legacy JWT older installs left behind
+   * is refused with `401 auth failed` — so the OAuth file has to be consulted
+   * before that JWT, or a working machine looks broken.
    */
   const resolveGatewayCredential = async (): Promise<Credential | undefined> => {
     const own = await readPluginCredential()
@@ -216,15 +279,32 @@ function apply(ctx: Context) {
           await writePluginCredential(next)
           loginSource = 'plugin'
           modelToken = next.accessToken
+          revokedByServer = false
           return { token: next.accessToken, claims: { exp: Math.floor((next.expiresAtMs ?? Date.now()) / 1000) } }
-        } catch {
-          // A refresh that fails is not fatal: the desktop app may still hold
-          // a working token.
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (isRefreshRefused(message)) {
+            // The refresh token is spent: no retry can bring this credential
+            // back, so it is dropped and a new sign-in is asked for.
+            await revokePluginCredential()
+            return undefined
+          }
+          // Any other failure is transient: the desktop app may still hold a
+          // working token, so the chain below is still worth walking.
         }
       } else {
         loginSource = 'plugin'
         modelToken = own.accessToken
         return { token: own.accessToken, claims: { exp: Math.floor((own.expiresAtMs ?? Date.now()) / 1000) } }
+      }
+    }
+    const oauth = await ensureOAuthCredential(region, process.env)
+    if (oauth.state === 'signed-in') {
+      loginSource = 'desktop-app'
+      modelToken = oauth.credential.token
+      return {
+        token: oauth.credential.token,
+        claims: { exp: Math.floor((oauth.credential.expiresAtMs ?? Date.now()) / 1000) },
       }
     }
     const state = await readCredential()
@@ -253,7 +333,14 @@ function apply(ctx: Context) {
           const next = await refreshPluginCredential(own, region, fetch, now)
           await writePluginCredential(next)
           return { state: 'signed-in', credential: toOAuthCredential(next) }
-        } catch {
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (isRefreshRefused(message)) {
+            // The grant is gone for good: reporting "expired" would only
+            // invite another doomed refresh and hide the sign-in button.
+            await revokePluginCredential()
+            return { state: 'signed-out', reason: 'not-signed-in' }
+          }
           return { state: 'expired', credential: toOAuthCredential(own) }
         }
       }
@@ -309,6 +396,18 @@ function apply(ctx: Context) {
     }
     await credits.refresh(state.credential, region, fetch, now)
     creditState = credits.snapshot === undefined ? 'unavailable' : 'ok'
+    // The account API answers a refused token with `401`. That is the one
+    // signal that the credential itself is the problem, and the balance, the
+    // ledger and the rate-limit window all carry it, so any of them counts.
+    const refused = [credits.error, credits.ledgerError, credits.rateLimitError]
+      .find(message => isUnauthorized(message))
+    if (refused !== undefined) {
+      await revokePluginCredential()
+      return
+    }
+    // A working read is proof the credential is alive again, whatever an
+    // earlier refusal said.
+    if (credits.snapshot !== undefined) revokedByServer = false
   }
 
   /**
@@ -337,7 +436,12 @@ function apply(ctx: Context) {
       signinPanel = panel
       signinError = undefined
     } catch (error) {
-      signinError = error instanceof Error ? error.message : String(error)
+      const message = error instanceof Error ? error.message : String(error)
+      if (isUnauthorized(message)) {
+        await revokePluginCredential()
+        return
+      }
+      signinError = message
       return
     }
     if (!pluginState.autoCheckin || panel === undefined) return
@@ -372,7 +476,12 @@ function apply(ctx: Context) {
       void refreshCredits()
       return claim
     } catch (error) {
-      signinError = error instanceof Error ? error.message : String(error)
+      const message = error instanceof Error ? error.message : String(error)
+      if (isUnauthorized(message)) {
+        await revokePluginCredential()
+        return undefined
+      }
+      signinError = message
       return undefined
     }
   }
@@ -526,24 +635,43 @@ function apply(ctx: Context) {
   // here would run an async disposer that unload never awaits.
   ctx.llm.registerAdapter(['minimaxcode'], adapter)
 
+  /**
+   * The sign-in state the card reports.
+   *
+   * It describes the credential the gateway will actually be called with, not
+   * a particular file on disk: the card exists to answer "will a request
+   * work", and a token the server refused is not a sign-in however unexpired
+   * it looks. Reading the legacy JWT alone is what made a machine whose model
+   * gateway was working report a signed-out, expired card.
+   */
+  const buildAuthStatus = async (): Promise<StatusDeps['auth']> => {
+    if (revokedByServer) return { state: 'signed-out', reason: 'credential-revoked' }
+    const current = await readNow()
+    if (current !== undefined) {
+      const remaining = expiresInMs(current.claims)
+      if (remaining <= 0) return { state: 'expired', reason: 'credential-expired' }
+      return {
+        state: 'signed-in',
+        daysRemaining: Math.ceil(remaining / (24 * 60 * 60 * 1000)),
+        expiry: expiryLevel(current.claims),
+      }
+    }
+    const state = await readCredential()
+    if (state.state === 'expired') return { state: 'expired' }
+    if (state.state === 'signed-out') return { state: 'signed-out', reason: state.reason }
+    return { state: 'signed-in' }
+  }
+
   /** Build the document the card renders, without ever exposing the token. */
   const buildStatus = async () => {
-    const state = await readCredential()
-    const auth = state.state === 'signed-in'
-      ? {
-          state: 'signed-in' as const,
-          daysRemaining: Math.ceil(expiresInMs(state.credential.claims) / (24 * 60 * 60 * 1000)),
-          expiry: expiryLevel(state.credential.claims),
-        }
-      : state.state === 'expired'
-        ? { state: 'expired' as const }
-        : { state: 'signed-out' as const, reason: state.reason }
-    // The balance is read on demand: a card that is never opened costs the
-    // account API nothing.
+    // The balance and the cycle are read on demand: a card that is never
+    // opened costs the account API nothing. They come first because a
+    // credential the server refuses is repaired, or dropped, while they run —
+    // and the sign-in state below has to describe what is left afterwards.
     await refreshCredits()
     await refreshSignin()
     return statusDocument({
-      auth,
+      auth: await buildAuthStatus(),
       region,
       catalogSource: catalog.source,
       catalogError: catalog.error,
@@ -614,6 +742,7 @@ function apply(ctx: Context) {
           pluginState = { ...pluginState, deviceLogin: undefined }
           await writePluginState(pluginState)
           loginPending = false
+          revokedByServer = false
           loginSource = 'plugin'
           modelToken = result.credential.accessToken
           // A fresh sign-in changes what the models and the balance are, so

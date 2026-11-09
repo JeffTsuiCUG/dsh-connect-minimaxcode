@@ -83,7 +83,7 @@ For the Web profile, replace `--profile desktop` with `--profile web`.
 
 ```bash
 pnpm pack
-dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.6.tgz
 ```
 > The desktop profile is owned exclusively by the Electron app. If the `dsh` command is not on your PATH, use the carrier CLI bundled with the DSH app (the path depends on the install location, for example `<DSH install dir>\resources\runtime\cli\bin\dsh.cmd`).
 
@@ -307,6 +307,13 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.6 (2026-11-09)
+
+- **Fixed "every model request fails while credits and check-in still work"**: the two features read two different credential files. The model gateway only knew the plugin's own sign-in and the **legacy JWT** an older desktop app left behind (`local-runtime.auth.json`), while current installs store an OAuth grant instead (`auth/prod/<region>/mcode-public/auth.json`, an `mmoat_` token). Once the legacy JWT expired, the gateway answered every request with `401 auth failed` — and because credits read the OAuth file, the card showed a healthy balance beside a dead model. The gateway now tries, in order: the plugin's own sign-in → **the desktop app's OAuth grant** → the legacy JWT, taking the first that works.
+- **Fixed a revoked token never prompting a new sign-in**: revocation does not change the locally recorded expiry, and the refresh check **looked only at that expiry**, so a dead token was used forever, every request answered `401`, and the card kept claiming a sign-in with no way back. An account endpoint answering `401` now forces one refresh; when the refresh itself is refused (`400`/`401`/`invalid_grant`, or a credential that carries no refresh token) the credential is deleted, the cached views of the account are dropped, and the card asks for a new sign-in. **A network error or a `5xx` is not a revocation** — a bad minute upstream must not sign anyone out.
+- **Fixed the status card reporting a working machine as expired**: the card's sign-in state read only the legacy JWT, so it said `expired` even when the gateway worked. It now describes **the credential the gateway will actually use**, and adds `credential-revoked` / `credential-expired` hints that point at the card's own sign-in button instead of "sign in to the desktop app and restart DSH".
+- Added `tests/revoked-credential.spec.ts` (6 cases) pinning: the credential is dropped and the card goes signed-out after a `401`, a refusal yields a "sign in again" remedy, a `503` leaves the credential alone, a plugin-only sign-in reports as signed-in, the OAuth grant wins over the legacy JWT, and the status document never leaks a token. All 193 cases pass.
 
 ### 0.5.5 (2026-11-06)
 

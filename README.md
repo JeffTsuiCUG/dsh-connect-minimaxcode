@@ -89,7 +89,7 @@ Web profile 把 `--profile desktop` 换成 `--profile web`。
 
 ```bash
 pnpm pack
-dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.5.tgz
+dsh plugin --profile desktop add ./dsh-connect-minimaxcode-0.5.6.tgz
 ```
 > 桌面版的 profile 由 Electron 应用独占，若 `dsh` 命令不在 PATH 中，请使用 DSH 应用自带的载体 CLI（路径随安装位置而变，例如 `<DSH安装目录>\resources\runtime\cli\bin\dsh.cmd`）。
 
@@ -339,6 +339,13 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.5.6（2026-11-09）
+
+- **修复「模型请求全部失败，但积分/签到正常」**：这是两条凭证路径读的不是同一个文件。模型网关此前只认插件自登录与桌面 App 留下的**旧版 JWT**（`local-runtime.auth.json`），而新版 App 早已改用 OAuth 存储（`auth/prod/<region>/mcode-public/auth.json`，`mmoat_` 令牌）。旧 JWT 过期后网关一律回 `401 auth failed`，而积分走的是 OAuth 文件，于是出现「积分能看、模型不通」。现在网关依次尝试：插件自登录 → **桌面 App 的 OAuth 授权** → 旧版 JWT，三者取第一个可用的。
+- **修复「令牌被上游吊销后永不重登」**：吊销不会改动本地记录的过期时间，而此前的续期判断**只看过期时间**，于是死令牌被一直使用，所有请求 401，界面却仍显示已登录、也没有重新登录入口。现在账户接口返回 `401` 会触发一次强制续期；续期被拒（`400`/`401`/`invalid_grant`，或凭据本身没有 refresh token）则删除该凭据、清空缓存状态，卡片改为提示重新登录。**续期的网络错误与 `5xx` 不算吊销**，不会因为上游一时抽风就把人登出。
+- **修复状态卡把「可用」报成「已过期」**：卡片的登录态此前只读旧 JWT，因此网关明明能通也显示 `expired`。现在它描述的是**网关实际会用的那枚凭据**，并新增 `credential-revoked` / `credential-expired` 两种更贴切的提示文案（指向卡片上的登录按钮，而不是「去桌面 App 登录后重启 DSH」）。
+- 新增 `tests/revoked-credential.spec.ts`（6 个用例）钉住：401 后凭据被删除且卡片转为未登录、被拒时给出「重新登录」提示、`503` 不会误删凭据、无桌面 App 时插件自登录显示为已登录、OAuth 授权优先于旧 JWT、状态文档不泄露任何令牌。全量 193 个用例通过。
 
 ### 0.5.5（2026-11-07）
 
