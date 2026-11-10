@@ -133,6 +133,28 @@ interface CatalogModel {
   inputModalities: string[];
   /** Whether the model accepts images at all. */
   attachment: boolean;
+  /**
+   * Whether reasoning can be turned off for this model.
+   *
+   * Upstream states it per model in `thinking_config.mode`: a `switchable`
+   * model accepts `thinking: {type: "disabled"}`, a `forced_on` model refuses
+   * it with `400 ... requires adaptive thinking` (both measured against the live
+   * gateway on 2026-11-10). Absent means upstream did not say, which is read as
+   * "reasoning is mandatory".
+   */
+  reasoningOptional?: boolean;
+  /**
+   * The reasoning effort levels upstream declares (`effort_options`).
+   *
+   * Recorded rather than acted on. pi-ai's own level mapping still dispatches
+   * the budget form (`thinking: {type: "enabled", budget_tokens}`) for these
+   * models, so naming the levels here changes no request; the names are kept
+   * so the information is not lost when it becomes usable. Reaching them on
+   * the wire would need pi-ai's `compat.forceAdaptiveThinking`, which switches
+   * the request to the adaptive form — a change of shape this plugin does not
+   * make on the strength of a catalog field alone.
+   */
+  effortLevels?: string[];
 }
 /** Provider id registered with DSH, distinct from the upstream one. */
 declare const MINIMAXCODE_PROVIDER_ID = "minimaxcode";
@@ -150,6 +172,11 @@ declare const MINIMAXCODE_PROVIDER_ID = "minimaxcode";
  * reports: 512k is the billing tier boundary, and the gateway itself was
  * measured serving 946,206 tokens before refusing ~1,050,000 with
  * `invalid params, context window exceeds limit (2013)`.
+ *
+ * The reasoning modes are the upstream ones measured on 2026-11-10: `M3` is
+ * `switchable` and accepts `thinking: {type: "disabled"}`, `M3.1-Flash` is
+ * `forced_on` and refuses it. Encoding them here keeps the fallback honest
+ * about what the gateway accepts even when no catalog could be fetched.
  */
 declare const FALLBACK_MODELS: readonly CatalogModel[];
 /** Where the currently served list came from. */
@@ -385,6 +412,36 @@ declare function parseRateLimitWindows(document: unknown): RateLimitWindows | un
  * @returns The windows, or `undefined` when the response carries none.
  */
 declare function fetchRateLimitWindows(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<RateLimitWindows | undefined>;
+/**
+ * The account's usage profile, as the upstream summarizes it.
+ *
+ * The desktop app asks for this once a day and shows it as a yearly heatmap
+ * with a few headline numbers. It is the only place the upstream says how the
+ * account actually uses its tokens, and none of it is visible elsewhere: the
+ * balance says how much is left, not how much was spent or how the account
+ * compares with other users.
+ */
+interface UsageProfile {
+  /** Days the summary window covers. */
+  totalDays?: number;
+  /** Days in the window that saw any usage. */
+  activeDays?: number;
+  /** Consecutive days of use up to today. */
+  currentConsecutiveDays?: number;
+  /** Tokens consumed in the window, in the upstream's own wording ("826.14M"). */
+  totalTokenConsumed?: string;
+  /** Where the account sits among other users, in percent (10.3 = above 89.7% of users). */
+  usageRankingPercent?: number;
+  /** The busiest day in the window. */
+  mostActiveDay?: {
+    date?: string;
+    tokenCount?: string;
+  };
+  /** When the upstream last refreshed the summary. */
+  lastUpdateTime?: string;
+  /** Daily token usage, oldest first. */
+  dailyTokenUsage?: number[];
+}
 /** What a quota read found. */
 interface RateLimitRead {
   /** The windows, when the plan meters any. */
@@ -440,14 +497,18 @@ declare class MinimaxCredits {
   get rateLimitAbsence(): 'no-subscription' | undefined;
   /** When the windows were last read. */
   get rateLimitAtMs(): number | undefined;
+  /** The account's usage profile as last read. */
+  get usageProfile(): UsageProfile | undefined;
+  /** Why the usage profile could not be read, when it could not. */
+  get usageProfileError(): string | undefined;
   /**
    * Read the balance and record how much was consumed since the last read.
    *
    * The credit ledger is read alongside it, but a ledger that cannot be read
    * never hides the balance: the two come from different endpoints and only
-   * the balance is essential. The rate-limit windows ride along under the
-   * same rule — they come from yet another endpoint, and none of the three
-   * takes the others down with it.
+   * the balance is essential. The rate-limit windows and the usage profile
+   * ride along under the same rule — they come from yet other endpoints, and
+   * none of the four takes the others down with it.
    *
    * @returns Whether the balance changed.
    */
@@ -467,6 +528,13 @@ declare class MinimaxCredits {
    * window that cannot be read leaves the last one on display.
    */
   refreshRateLimit(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<void>;
+  /**
+   * Read the account's usage profile.
+   *
+   * Same rule as the ledger: a failure is remembered but never thrown, and a
+   * profile that cannot be read leaves the last one on display.
+   */
+  refreshUsageProfile(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<void>;
   /**
    * Read the windows from whichever endpoint can answer.
    *
@@ -940,6 +1008,36 @@ interface RateLimitStatus {
   /** Why the windows could not be read. */
   error?: string;
 }
+/**
+ * The account's usage profile, as the upstream summarizes it.
+ *
+ * This is the account's own history — how long it has been used, how much it
+ * has consumed, how it ranks — and it is a different thing from the usage
+ * this host has made, which the card reports separately.
+ */
+interface UsageProfileStatus {
+  /** Whether the profile could be read. */
+  state: 'ok' | 'unavailable';
+  /** Days the summary window covers. */
+  totalDays?: number;
+  /** Days in the window that saw any usage. */
+  activeDays?: number;
+  /** Consecutive days of use up to today. */
+  consecutiveDays?: number;
+  /** Tokens consumed in the window, in the upstream's own wording. */
+  totalTokenConsumed?: string;
+  /** Where the account sits among other users, in percent. */
+  rankingPercent?: number;
+  /** The busiest day in the window. */
+  mostActiveDay?: {
+    date?: string;
+    tokenCount?: string;
+  };
+  /** When the upstream last refreshed the summary. */
+  updatedAt?: string;
+  /** Why the profile could not be read. */
+  error?: string;
+}
 /** What the card renders. */
 interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired';
@@ -970,6 +1068,8 @@ interface StatusDocument {
   signin?: SigninStatus;
   /** How the plugin is signed in. */
   login?: LoginStatus;
+  /** The account's usage profile, when it could be read. */
+  usageProfile?: UsageProfileStatus;
 }
 /** Inputs the document is derived from. */
 interface StatusDeps {
@@ -998,6 +1098,8 @@ interface StatusDeps {
   signin?: SigninStatus;
   /** How the plugin is signed in. */
   login?: LoginStatus;
+  /** The account's usage profile, when the account API could be reached. */
+  usageProfile?: UsageProfileStatus;
 }
 /**
  * Build the card's status document.

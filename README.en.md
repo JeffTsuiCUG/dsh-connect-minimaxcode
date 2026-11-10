@@ -283,6 +283,27 @@ Two sets of data each cover one thing:
 
   > The official price list has no separate price for **cache writes** (`cache_creation_input_tokens`), so the plugin counts its tokens but **does not convert them to money**, to avoid quoting a number that has no public basis.
 
+### Account usage profile
+
+The account's **usage history** comes from the open platform's usage summary, and it is a different thing from the token count the pill reports: the latter counts only the requests this host made.
+
+```
+GET https://www.minimaxi.com/backend/account/token_plan/usage_summary?token_type=5&heatmap_days=365&business=Agent&device_platform=desktop
+Authorization: Bearer <OAuth 令牌>
+```
+
+The card shows the parts worth acting on:
+
+| Field | Meaning |
+| --- | --- |
+| `current_consecutive_days` | Days used in a row |
+| `active_days` / `total_days` | Days with usage in the window / the window's length |
+| `total_token_consumed` | Tokens consumed in the window, in the upstream's own wording (`826.14M`) |
+| `usage_ranking_percent` | Where the account ranks by usage |
+| `most_active_day` | The busiest day and what it consumed |
+
+This data **needs no M Plan subscription**: the endpoint is an account one, read with the OAuth bearer, unlike the limit windows, which belong to the subscription.
+
 ### About token refresh
 
 The OAuth token is valid for about an hour and is refreshed automatically by the client. The plugin **only refreshes it once, with the refresh token the app already stored, when its own token has expired**, and writes the rotated new tokens back to the same file atomically, in the client's **original format** (with `generation` unchanged), so the desktop app's login state is unaffected. The plugin never starts a login, never signs out, and never calls any paid or subscription endpoint.
@@ -307,6 +328,15 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.5.8 (2026-11-10)
+
+- **Fixed "M3's reasoning could not be turned off"**: the plugin used to declare "reasoning cannot be disabled" for *every* reasoning model, on the grounds that the gateway refuses `thinking: {type: "disabled"}` with `400 ... requires adaptive thinking`. That refusal only holds for a `forced_on` model: the upstream catalog states `thinking_config.mode` per model, and `MiniMax-M3` is `switchable` (measured: the disabled form is accepted, 200) while `MiniMax-M3.1-Flash` is `forced_on` (measured: 400). Each model is now handled as upstream describes it: **M3's reasoning levels now include "off"**, and picking it really does stop the reasoning — fewer tokens, lower latency. M3.1-Flash is unchanged and the option still does not appear.
+  Upstream's `effort_options` (six levels for M3.1-Flash: default/low/medium/high/xhigh/max) are parsed and recorded but **not wired**: pi-ai's level mapping still dispatches the budget form, and reaching those six levels would switch the whole request shape, which this change does not do.
+- **New "account usage profile"**: reads the open platform's `GET /backend/account/token_plan/usage_summary` (a constant this plugin had defined and never used). The card shows the consecutive days of use, the active days in the window, the tokens consumed in it, the usage ranking and the busiest day. It describes the *account*'s history, which is a different thing from the token count the pill reports for this host.
+- **Says why there are no limit windows**: an account without an M Plan subscription gets `2062 no active token plan subscription` from upstream (already recognised in 0.5.7). The card now states that outright instead of leaving the reader to assume a failed read.
+- **Endpoint survey**: every one of the twenty account-domain endpoints the desktop app calls each day was mapped — **nineteen of them are readable with the OAuth bearer and need no subscription at all**. What a subscription buys is not more endpoints but two things: the limit windows and a larger allowance.
+- Added `tests/usage-profile.spec.ts` (16 cases) plus reasoning-mode cases in `tests/catalog.spec.ts` / `tests/adapter.spec.ts`. All 236 cases pass.
 
 ### 0.5.7 (2026-11-10)
 

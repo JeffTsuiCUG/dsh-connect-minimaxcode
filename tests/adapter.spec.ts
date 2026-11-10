@@ -245,6 +245,32 @@ describe('the thinking requirement', () => {
     expect(descriptor.thinkingLevelMap).toEqual({ off: null })
   })
 
+  it('pins "off" to null when upstream says reasoning is mandatory', () => {
+    build(fakeCatalog([{ ...model('M-A'), reasoningOptional: false }]))
+    const descriptor = publishedModels()[0] as unknown as { thinkingLevelMap?: Record<string, unknown> }
+    expect(descriptor.thinkingLevelMap).toEqual({ off: null })
+  })
+
+  /**
+   * A model upstream marks `switchable` accepts `thinking: {type: "disabled"}`
+   * (measured 200 on the live gateway), and pi-ai only sends that form when
+   * `thinkingLevelMap.off` is not `null`. Leaving the level out of the map
+   * therefore both offers the option and makes it work — the defect this
+   * fixes was pinning `off` for every reasoning model, which left M3's
+   * reasoning impossible to turn off.
+   */
+  it('leaves "off" available for a model whose reasoning is optional', () => {
+    build(fakeCatalog([{ ...model('M-A'), reasoningOptional: true }]))
+    const descriptor = publishedModels()[0] as unknown as { thinkingLevelMap?: Record<string, unknown> }
+    // An absent `off` is what "supported" looks like: pi-ai reads it as
+    // supported and sends `thinking: {type: "disabled"}` when the user picks
+    // the level, which the gateway accepts for a switchable model.
+    expect(descriptor.thinkingLevelMap?.off).not.toBeNull()
+    // Nothing else is pinned either, so pi-ai's own defaults still decide
+    // which levels a conversation offers.
+    expect(Object.keys(descriptor.thinkingLevelMap ?? {})).toEqual([])
+  })
+
   it('leaves a non-reasoning model alone', () => {
     const plain = { ...model('M-A'), reasoning: false }
     build(fakeCatalog([plain]))

@@ -69,6 +69,25 @@ describe('statusDocument', () => {
     expect(doc.rateLimit?.weekly?.usedPercent).toBe(29)
   })
 
+  it('carries the account usage profile through', () => {
+    const profile = {
+      state: 'ok' as const,
+      totalDays: 90,
+      activeDays: 30,
+      consecutiveDays: 4,
+      totalTokenConsumed: '826.14M',
+      rankingPercent: 10.296932108741714,
+      mostActiveDay: { date: '2026-10-19', tokenCount: '234.25M' },
+    }
+    const doc = statusDocument(base({ usageProfile: profile }))
+    expect(doc.usageProfile).toEqual(profile)
+  })
+
+  it('leaves the usage profile out when there is none', () => {
+    const doc = statusDocument(base())
+    expect(doc.usageProfile).toBeUndefined()
+  })
+
   it('never carries a token', () => {
     const doc = JSON.stringify(statusDocument(base()))
     expect(doc).not.toMatch(/eyJ/)

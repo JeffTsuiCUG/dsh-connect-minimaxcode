@@ -56,12 +56,16 @@ const NO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
  *   anthropic client sends the resolved apiKey as `x-api-key`, and MiniMax
  *   rejects that alone with 401 "token is required"; it accepts both headers, so
  *   the bearer value is added alongside rather than replacing it.
- * - `thinkingLevelMap.off = null` marks "thinking off" as unsupported. Every
- *   MiniMax model here requires reasoning, and pi-ai answers an explicit
- *   `thinkingEnabled: false` with `thinking: {type: "disabled"}`, which the
- *   gateway refuses with `400 ... requires adaptive thinking`. Marking the level
- *   unsupported makes pi-ai omit the field instead, which the gateway accepts
- *   (and, correctly, hides the option that cannot work).
+ * - `thinkingLevelMap.off` is how a model says "reasoning cannot be turned
+ *   off". pi-ai answers an explicit `thinkingEnabled: false` with
+ *   `thinking: {type: "disabled"}` whenever `off` is not `null`, and omits the
+ *   field entirely when it is. Which of the two a model needs is upstream's
+ *   call, not this plugin's: `thinking_config.mode` is `switchable` for a model
+ *   that accepts the disabled form and `forced_on` for one that refuses it with
+ *   `400 ... requires adaptive thinking` (both measured on 2026-11-10). So the
+ *   restriction is declared only where it is real — pinning `off` to `null` for
+ *   a switchable model would make its reasoning impossible to turn off, and
+ *   leaving it unset for a forced_on model would make the gateway answer 400.
  *
  * @param model - Catalog entry to describe.
  * @param baseUrl - Region gateway base the anthropic client extends.
@@ -86,7 +90,14 @@ function toPiModel(
     contextWindow: model.contextWindow,
     maxTokens: model.maxOutputTokens ?? 128000,
     ...(authorization === undefined ? {} : { headers: { authorization } }),
-    ...(model.reasoning ? { thinkingLevelMap: { off: null } } : {}),
+    // A reasoning model with optional reasoning declares no level map at all:
+    // pi-ai reads an absent `off` as "supported", so it offers the level and
+    // sends `thinking: {type: "disabled"}` when the user picks it. A model
+    // whose reasoning is mandatory pins `off` to `null`, which both hides the
+    // option and keeps the gateway's refusal out of the conversation.
+    ...(model.reasoning
+      ? (model.reasoningOptional === true ? {} : { thinkingLevelMap: { off: null } })
+      : {}),
   }
 }
 

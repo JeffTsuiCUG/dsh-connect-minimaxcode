@@ -457,4 +457,68 @@ describe('client bundle', () => {
     // balance is still true, so it is still shown.
     expect(harness.render(component, {})).not.toBeNull()
   })
+
+  it('shows the account usage profile the upstream summarized', async () => {
+    const loaded = loadClient({
+      credits: { state: 'ok', total: 100, purchased: 0, free: 100, consumed: 0 },
+      usageProfile: {
+        state: 'ok',
+        totalDays: 90,
+        activeDays: 30,
+        consecutiveDays: 4,
+        totalTokenConsumed: '826.14M',
+        rankingPercent: 10.296932108741714,
+        mostActiveDay: { date: '2026-10-19', tokenCount: '234.25M' },
+      },
+    })
+    const harness = reactHarness()
+    let page: ((props: unknown) => unknown) | undefined
+    loaded.registrations[0]!.factory(() => harness.react).apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (_options: unknown, rendered: (props: unknown) => unknown) => {
+          page = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    harness.render(page!, { view: 'page' })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const tree = JSON.stringify(harness.render(page!, { view: 'page' }))
+    expect(tree).toContain('连续使用 4 天')
+    expect(tree).toContain('90')
+    expect(tree).toContain('30')
+    expect(tree).toContain('826.14M')
+    expect(tree).toContain('10.3')
+    expect(tree).toContain('2026-10-19')
+  })
+
+  it('says why there are no usage windows when the plan has none', async () => {
+    const loaded = loadClient({
+      credits: { state: 'ok', total: 100, purchased: 0, free: 100, consumed: 0 },
+      rateLimit: { state: 'unavailable', reason: 'no-subscription' },
+    })
+    const harness = reactHarness()
+    let page: ((props: unknown) => unknown) | undefined
+    loaded.registrations[0]!.factory(() => harness.react).apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (_options: unknown, rendered: (props: unknown) => unknown) => {
+          page = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    harness.render(page!, { view: 'page' })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const tree = JSON.stringify(harness.render(page!, { view: 'page' }))
+    // The rolling windows belong to the subscription; an account holding only
+    // a credit package has none, and the card says so rather than leaving the
+    // reader to wonder whether a read failed.
+    expect(tree).toContain('未订阅 M Plan')
+  })
 })

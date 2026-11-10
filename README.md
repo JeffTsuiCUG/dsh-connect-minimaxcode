@@ -319,6 +319,27 @@ Authorization: Bearer <API Key>
 - **没有订阅就没有窗口，且这不算错误**：上游对未订阅 M Plan 的账户明确回 `2062 no active token plan subscription`，插件会如实标为「无订阅」而不是「读取失败」—— 积分包本身不带滚动窗口
 - **接口异常时其余显示不受影响**：限额读不到，胶囊与卡片仍显示余额、签到与本机用量
 - 上游还发 `current_*_count` 计数字段（无计数制时为 `-1`），插件只读百分比与起止时刻
+### 账户用量画像
+
+账户的**用量历史**由开放平台的用量汇总接口给出，与「本机累计 token」是两回事 —— 后者只统计这台机器发起的请求：
+
+```
+GET https://www.minimaxi.com/backend/account/token_plan/usage_summary?token_type=5&heatmap_days=365&business=Agent&device_platform=desktop
+Authorization: Bearer <OAuth 令牌>
+```
+
+卡片显示的是其中有行动价值的几项：
+
+| 字段 | 含义 |
+| --- | --- |
+| `current_consecutive_days` | 连续使用天数 |
+| `active_days` / `total_days` | 统计窗口内有使用的天数 / 窗口长度 |
+| `total_token_consumed` | 窗口内累计消耗（上游自己的写法，如 `826.14M`） |
+| `usage_ranking_percent` | 用量排名分位 |
+| `most_active_day` | 最活跃的一天及其消耗 |
+
+这一节读到的数据**不需要订阅 M Plan**：该接口属于账户域，用 OAuth 令牌即可读取，与限额窗口（属于订阅）不同。
+
 ### 关于续期
 
 OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自己的令牌已过期时**才用 App 已存的 refresh token 续一次，并把轮换后的新令牌按客户端**原格式原子写回**同一个文件（`generation` 保持不变），因此桌面 App 的登录态不受影响。插件不会发起登录、不会登出、也不会调用任何付费/订阅类接口。
@@ -343,6 +364,15 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.5.8（2026-11-10）
+
+- **修复「M3 的推理关不掉」**：插件此前对**所有**推理模型都声明「不支持关闭推理」，理由是网关会以 `400 ... requires adaptive thinking` 拒绝 `thinking: {type: "disabled"}`。但该拒绝只对 `forced_on` 的模型成立 —— 上游模型目录逐模型声明 `thinking_config.mode`，`MiniMax-M3` 是 `switchable`（实测接受该形式，200），`MiniMax-M3.1-Flash` 才是 `forced_on`（实测 400）。现在按上游声明逐模型处理：**M3 的推理档位里出现了「关」**，选它就真的不发推理，既省 token 也更快；M3.1-Flash 的行为不变，选项仍不出现。
+  上游的 `effort_options`（M3.1-Flash 有 default/low/medium/high/xhigh/max 六档）也一并解析存档，但**未接线**：pi-ai 的档位映射目前走 budget 形式，要用上这六档得切换整个请求形态，这一步不在本次改动里。
+- **新增「账户用量画像」**：读取开放平台的 `GET /backend/account/token_plan/usage_summary`（该常量此前定义了却从未使用），卡片显示连续使用天数、统计窗口内的活跃天数、窗口内累计消耗、用量排名分位与最活跃的一天。它说的是**账户**的历史，与胶囊里「本机累计 token」是两回事。
+- **说明「为什么没有限额窗口」**：账户未订阅 M Plan 时，上游回 `2062 no active token plan subscription`（0.5.7 已识别）。现在卡片直接写明「未订阅 M Plan（仅积分包），因此没有限额窗口」，而不是让人以为读取失败。
+- **接口盘点**：把桌面 App 每天真实调用的 20 个账户域接口全部盘了一遍 —— 其中 **19 个用 OAuth 令牌即可读取，无需任何订阅**，只有「限额窗口」属于订阅本身。也就是说订阅 M Plan 换来的不是「更多接口」，而是**限额窗口**与**更高额度**这两样。
+- 新增 `tests/usage-profile.spec.ts`（16 个用例）与 `tests/catalog.spec.ts` / `tests/adapter.spec.ts` 的推理模式用例。全量 236 个用例通过。
 
 ### 0.5.7（2026-11-10）
 

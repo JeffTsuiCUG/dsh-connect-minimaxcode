@@ -24,7 +24,7 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
 import {
   credentialNeedsRefresh,
@@ -517,6 +517,33 @@ function apply(ctx: Context) {
     }
   }
 
+  /**
+   * The account's usage profile as the card reads it.
+   *
+   * The upstream's own summary of the account's history: how many days it has
+   * been used in a row, how much it has consumed, and where it ranks. It is
+   * about the account rather than about this host, which is what the pill's
+   * own token count reports.
+   */
+  const buildUsageProfileStatus = (): UsageProfileStatus | undefined => {
+    const profile = credits.usageProfile
+    if (profile === undefined) {
+      return credits.usageProfileError === undefined
+        ? undefined
+        : { state: 'unavailable', error: credits.usageProfileError }
+    }
+    return {
+      state: 'ok',
+      totalDays: profile.totalDays,
+      activeDays: profile.activeDays,
+      consecutiveDays: profile.currentConsecutiveDays,
+      totalTokenConsumed: profile.totalTokenConsumed,
+      rankingPercent: profile.usageRankingPercent,
+      mostActiveDay: profile.mostActiveDay,
+      updatedAt: profile.lastUpdateTime,
+    }
+  }
+
   /** The plan's rolling usage windows as the card reads them. */
   const buildRateLimitStatus = (): RateLimitStatus => {
     if (creditState === 'signed-out' || creditState === 'expired') {
@@ -689,6 +716,7 @@ function apply(ctx: Context) {
       usage: buildUsageStatus(),
       signin: buildSigninStatus(),
       login: buildLoginStatus(),
+      usageProfile: buildUsageProfileStatus(),
     })
   }
 

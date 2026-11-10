@@ -129,6 +129,85 @@ describe('parseCatalog', () => {
     // reported as an overflow on every turn.
     for (const model of FALLBACK_MODELS) expect(model.contextWindow).toBe(1000000)
   })
+
+  it('reads the reasoning mode upstream declares', () => {
+    // `switchable` is the only mode whose reasoning can be turned off: the
+    // gateway accepts `thinking: {type: "disabled"}` for those models and
+    // refuses it for the rest with `400 ... requires adaptive thinking`.
+    const models = parseCatalog({
+      providers: [{
+        providerId: 'minimax',
+        config: {
+          models: {
+            'MiniMax-M3': { name: 'M3', reasoning: true, thinking_config: { mode: 'switchable', default_value: 'true' } },
+            'MiniMax-M3.1-Flash': { name: 'M3.1-Flash', reasoning: true, thinking_config: { mode: 'forced_on' } },
+            'MiniMax-M3.2': { name: 'M3.2', reasoning: true },
+            'MiniMax-M3.3': { name: 'M3.3', reasoning: true, thinking_config: { mode: 'something-new' } },
+          },
+        },
+      }],
+    })
+    expect(models[0]!.reasoningOptional).toBe(true)
+    expect(models[1]!.reasoningOptional).toBe(false)
+    // Upstream said nothing, or said something this plugin does not know:
+    // both leave reasoning mandatory, and neither invents an answer.
+    expect(models[2]!.reasoningOptional).toBeUndefined()
+    expect(models[3]!.reasoningOptional).toBeUndefined()
+  })
+
+  it('records the effort levels upstream declares', () => {
+    // Recorded, not acted on: pi-ai's level mapping still dispatches the
+    // budget form for these models, so the names change no request yet.
+    const models = parseCatalog({
+      providers: [{
+        providerId: 'minimax',
+        config: {
+          models: {
+            'MiniMax-M3.1-Flash': {
+              name: 'M3.1-Flash',
+              reasoning: true,
+              thinking_config: { mode: 'forced_on' },
+              effort_options: ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
+              default_effort: 'default',
+            },
+            'MiniMax-M3': { name: 'M3', reasoning: true, thinking_config: { mode: 'switchable' } },
+          },
+        },
+      }],
+    })
+    expect(models[0]!.effortLevels).toEqual(['default', 'low', 'medium', 'high', 'xhigh', 'max'])
+    expect(models[1]!.effortLevels).toBeUndefined()
+  })
+
+  it('ignores a malformed effort level list', () => {
+    for (const options of [[], 'default', [null, 3], [{}]]) {
+      const models = parseCatalog({
+        providers: [{
+          providerId: 'minimax',
+          config: { models: { 'MiniMax-M3': { name: 'M3', effort_options: options } } },
+        }],
+      })
+      expect(models[0]!.effortLevels).toBeUndefined()
+    }
+  })
+
+  it('treats a changed reasoning mode as a changed catalog', () => {
+    // The mode is part of the descriptor the adapter publishes, so a model
+    // that starts accepting a disabled thinking form must reach the host.
+    const catalog = new MinimaxCatalog()
+    const base = { ...FALLBACK_MODELS[1]! }
+    expect(catalog.set([base], 'live')).toBe(true)
+    expect(catalog.set([base], 'live')).toBe(false)
+    expect(catalog.set([{ ...base, reasoningOptional: true }], 'live')).toBe(true)
+  })
+
+  it('treats changed effort levels as a changed catalog', () => {
+    const catalog = new MinimaxCatalog()
+    const base = { ...FALLBACK_MODELS[1]! }
+    expect(catalog.set([base], 'live')).toBe(true)
+    expect(catalog.set([base], 'live')).toBe(false)
+    expect(catalog.set([{ ...base, effortLevels: ['default', 'high'] }], 'live')).toBe(true)
+  })
 })
 
 describe('MinimaxCatalog', () => {

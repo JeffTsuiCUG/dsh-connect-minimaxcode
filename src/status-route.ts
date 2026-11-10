@@ -133,6 +133,34 @@ export interface RateLimitStatus {
   error?: string
 }
 
+/**
+ * The account's usage profile, as the upstream summarizes it.
+ *
+ * This is the account's own history — how long it has been used, how much it
+ * has consumed, how it ranks — and it is a different thing from the usage
+ * this host has made, which the card reports separately.
+ */
+export interface UsageProfileStatus {
+  /** Whether the profile could be read. */
+  state: 'ok' | 'unavailable'
+  /** Days the summary window covers. */
+  totalDays?: number
+  /** Days in the window that saw any usage. */
+  activeDays?: number
+  /** Consecutive days of use up to today. */
+  consecutiveDays?: number
+  /** Tokens consumed in the window, in the upstream's own wording. */
+  totalTokenConsumed?: string
+  /** Where the account sits among other users, in percent. */
+  rankingPercent?: number
+  /** The busiest day in the window. */
+  mostActiveDay?: { date?: string; tokenCount?: string }
+  /** When the upstream last refreshed the summary. */
+  updatedAt?: string
+  /** Why the profile could not be read. */
+  error?: string
+}
+
 /** What the card renders. */
 export interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired'
@@ -159,6 +187,8 @@ export interface StatusDocument {
   signin?: SigninStatus
   /** How the plugin is signed in. */
   login?: LoginStatus
+  /** The account's usage profile, when it could be read. */
+  usageProfile?: UsageProfileStatus
 }
 
 /** Inputs the document is derived from. */
@@ -184,6 +214,8 @@ export interface StatusDeps {
   signin?: SigninStatus
   /** How the plugin is signed in. */
   login?: LoginStatus
+  /** The account's usage profile, when the account API could be reached. */
+  usageProfile?: UsageProfileStatus
 }
 
 const HINTS: Record<string, string> = {
@@ -216,6 +248,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.usage === undefined ? {} : { usage: deps.usage },
     ...deps.signin === undefined ? {} : { signin: deps.signin },
     ...deps.login === undefined ? {} : { login: deps.login },
+    ...deps.usageProfile === undefined ? {} : { usageProfile: deps.usageProfile },
   }
   if (auth.state === 'expired') {
     return {

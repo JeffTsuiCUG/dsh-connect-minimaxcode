@@ -100,6 +100,17 @@ interface StatusDocument {
     reason?: 'no-subscription'
     error?: string
   }
+  usageProfile?: {
+    state: 'ok' | 'unavailable'
+    totalDays?: number
+    activeDays?: number
+    consecutiveDays?: number
+    totalTokenConsumed?: string
+    rankingPercent?: number
+    mostActiveDay?: { date?: string; tokenCount?: string }
+    updatedAt?: string
+    error?: string
+  }
   signin?: {
     state: 'ok' | 'unavailable'
     today?: { dayNo: number; points: number; status: number; claimable: boolean; claimed: boolean }
@@ -177,6 +188,13 @@ interface StatusDocument {
     claimableToday: '今日可签到',
     usageWindow: '{duration}限额',
     resetIn: '{duration}后',
+    accountUsage: '账户用量',
+    usageStreak: '连续使用 {days} 天',
+    usageActiveDays: '近 {total} 天中有 {active} 天用过',
+    usageTotalTokens: '累计消耗 {count} tokens',
+    usageRanking: '用量排名前 {percent}%',
+    usageBestDay: '最活跃的一天 {date}',
+    planNoSubscription: '未订阅 M Plan（仅积分包），因此没有限额窗口',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -219,6 +237,13 @@ interface StatusDocument {
     claimableToday: 'Claimable today',
     usageWindow: '{duration} limit',
     resetIn: 'resets in {duration}',
+    accountUsage: 'Account usage',
+    usageStreak: '{days} days in a row',
+    usageActiveDays: 'Used on {active} of the last {total} days',
+    usageTotalTokens: '{count} tokens consumed',
+    usageRanking: 'Top {percent}% by usage',
+    usageBestDay: 'Busiest day {date}',
+    planNoSubscription: 'No M Plan subscription (credits only), so there are no usage windows',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -381,6 +406,48 @@ interface StatusDocument {
         )
       }
 
+      /**
+       * The account's own usage history.
+       *
+       * This is not the token count of this host — the pill reports that
+       * separately — but the account's days, consumption and standing, which
+       * is what the upstream knows and nobody else does.
+       */
+      function usageProfileBlock(t: (key: string, params?: Record<string, unknown>) => string, profile?: StatusDocument['usageProfile']): unknown {
+        if (profile === undefined || profile.state !== 'ok') return null
+        const rows: unknown[] = []
+        if (profile.consecutiveDays !== undefined && profile.consecutiveDays > 0) {
+          rows.push(row(t('usageStreak', { days: profile.consecutiveDays }), ''))
+        }
+        if (profile.activeDays !== undefined) {
+          rows.push(row(t('usageActiveDays', { active: profile.activeDays, total: profile.totalDays ?? '' }), ''))
+        }
+        if (profile.totalTokenConsumed !== undefined) {
+          rows.push(row(t('usageTotalTokens', { count: profile.totalTokenConsumed }), ''))
+        }
+        if (profile.rankingPercent !== undefined) {
+          rows.push(row(t('usageRanking', { percent: profile.rankingPercent.toFixed(1) }), ''))
+        }
+        if (profile.mostActiveDay?.date !== undefined) {
+          rows.push(row(t('usageBestDay', { date: profile.mostActiveDay.date }), ''))
+        }
+        if (rows.length === 0) return null
+        return h('div', { style: expiryBoxStyle, 'data-minimax-usage-profile': true }, ...rows)
+      }
+
+      /**
+       * Why there are no usage windows, when there are none because the plan
+       * has none to give.
+       *
+       * The rolling windows belong to the subscription; an account holding
+       * only a credit package has none, and saying so is more useful than
+       * leaving the reader to wonder whether a read failed.
+       */
+      function planNotice(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown {
+        if (rateLimit?.reason !== 'no-subscription') return null
+        return h('div', { style: mutedStyle, 'data-minimax-plan-notice': true }, t('planNoSubscription'))
+      }
+
       /** The pill itself; the gate decides whether it is drawn at all. */
       function CreditPill(props: SlotProps) {
         const [status] = useStatus()
@@ -421,6 +488,8 @@ interface StatusDocument {
               : null,
             expiryBlock(t, credits_),
             rateLimitBlock(t, status?.rateLimit),
+            planNotice(t, status?.rateLimit),
+            usageProfileBlock(t, status?.usageProfile),
             usage !== undefined
               ? h('div', { style: rowStyle },
                 h('span', null, t('tokens', { count: tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens) })),
@@ -625,6 +694,7 @@ interface StatusDocument {
           row(t('purchased'), credits(credits_!.purchased, 3)),
           expiryBlock(t, credits_),
           rateLimitBlock(t, status?.rateLimit),
+          planNotice(t, status?.rateLimit),
           signinBlock(t, signin, refresh),
           h('div', { style: sectionTitleStyle }, t('lots')),
           (credits_!.upcoming ?? []).length === 0
@@ -642,6 +712,7 @@ interface StatusDocument {
               usage.requests > 0 ? row(t('requests', { count: usage.requests }), usage.lastModel ?? '') : null,
             )
             : null,
+          usageProfileBlock(t, status?.usageProfile),
           loginBlock(t, login, refresh),
           credits_!.updatedAtMs !== undefined
             ? h('div', { style: mutedStyle }, t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }))

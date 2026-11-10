@@ -637,6 +637,102 @@ export async function fetchTokenPlanApiKey(
   return typeof key === 'string' && key.length > 0 ? key : undefined
 }
 
+/**
+ * The account's usage profile, as the upstream summarizes it.
+ *
+ * The desktop app asks for this once a day and shows it as a yearly heatmap
+ * with a few headline numbers. It is the only place the upstream says how the
+ * account actually uses its tokens, and none of it is visible elsewhere: the
+ * balance says how much is left, not how much was spent or how the account
+ * compares with other users.
+ */
+export interface UsageProfile {
+  /** Days the summary window covers. */
+  totalDays?: number
+  /** Days in the window that saw any usage. */
+  activeDays?: number
+  /** Consecutive days of use up to today. */
+  currentConsecutiveDays?: number
+  /** Tokens consumed in the window, in the upstream's own wording ("826.14M"). */
+  totalTokenConsumed?: string
+  /** Where the account sits among other users, in percent (10.3 = above 89.7% of users). */
+  usageRankingPercent?: number
+  /** The busiest day in the window. */
+  mostActiveDay?: { date?: string; tokenCount?: string }
+  /** When the upstream last refreshed the summary. */
+  lastUpdateTime?: string
+  /** Daily token usage, oldest first. */
+  dailyTokenUsage?: number[]
+}
+
+/**
+ * Read a string field, ignoring anything that is not a string.
+ *
+ * The upstream's token counts carry their own unit ("826.14M"), so they are
+ * kept as the wording it used rather than pulled apart into a number.
+ */
+function toText(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
+/**
+ * Read the usage profile out of a summary response.
+ *
+ * Every field is optional in practice: the upstream adds fields over time, and
+ * an account with no history at all answers with a body that carries none of
+ * them. A field that is missing — or that arrives in a shape this does not
+ * recognise — is therefore reported as absent rather than as an error, so one
+ * odd field never costs the whole profile. A body that is not an object at
+ * all carries no profile and yields none.
+ */
+export function parseUsageProfile(document: unknown): UsageProfile | undefined {
+  if (typeof document !== 'object' || document === null || Array.isArray(document)) return undefined
+  const record = document as Record<string, unknown>
+  const day = record.most_active_day
+  const mostActiveDay = typeof day === 'object' && day !== null ? (day as Record<string, unknown>) : undefined
+  const date = toText(mostActiveDay?.date)
+  const tokenCount = toText(mostActiveDay?.token_count)
+  const daily = Array.isArray(record.daily_token_usage)
+    ? record.daily_token_usage.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry))
+    : undefined
+  return {
+    totalDays: toNumber(record.total_days),
+    activeDays: toNumber(record.active_days),
+    currentConsecutiveDays: toNumber(record.current_consecutive_days),
+    totalTokenConsumed: toText(record.total_token_consumed),
+    usageRankingPercent: toNumber(record.usage_ranking_percent),
+    mostActiveDay: date === undefined && tokenCount === undefined ? undefined : { date, tokenCount },
+    lastUpdateTime: toText(record.last_update_time),
+    dailyTokenUsage: daily,
+  }
+}
+
+/**
+ * Fetch the account's usage profile.
+ *
+ * The endpoint lives on the open-platform host and takes the same OAuth
+ * bearer the membership endpoint takes; the JWT the model gateway accepts
+ * does not work here. The query is the one the desktop app sends, and it is
+ * not trimmed down: `token_type` picks which token kind is counted and
+ * `heatmap_days` sets how far back the daily series reaches.
+ *
+ * @returns The profile, or `undefined` when the response carries no object.
+ */
+export async function fetchUsageProfile(
+  credential: OAuthCredential,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<UsageProfile | undefined> {
+  const url = `${MINIMAX_OPEN_HOSTS[region]}${USAGE_SUMMARY_PATH}?token_type=5&heatmap_days=365&business=Agent&device_platform=desktop`
+  const response = await fetchImpl(url, {
+    headers: { accept: 'application/json', authorization: `Bearer ${credential.token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`usage summary request failed: HTTP ${response.status}`)
+  }
+  return parseUsageProfile(await response.json())
+}
+
 /** What a quota read found. */
 export interface RateLimitRead {
   /** The windows, when the plan meters any. */
@@ -752,6 +848,8 @@ export class MinimaxCredits {
   #rateLimitError: string | undefined
   #rateLimitAbsence: 'no-subscription' | undefined
   #rateLimitAtMs: number | undefined
+  #usageProfile: UsageProfile | undefined
+  #usageProfileError: string | undefined
   #apiKey: string | undefined
 
   /** The balance as last read. */
@@ -804,14 +902,24 @@ export class MinimaxCredits {
     return this.#rateLimitAtMs
   }
 
+  /** The account's usage profile as last read. */
+  get usageProfile(): UsageProfile | undefined {
+    return this.#usageProfile
+  }
+
+  /** Why the usage profile could not be read, when it could not. */
+  get usageProfileError(): string | undefined {
+    return this.#usageProfileError
+  }
+
   /**
    * Read the balance and record how much was consumed since the last read.
    *
    * The credit ledger is read alongside it, but a ledger that cannot be read
    * never hides the balance: the two come from different endpoints and only
-   * the balance is essential. The rate-limit windows ride along under the
-   * same rule — they come from yet another endpoint, and none of the three
-   * takes the others down with it.
+   * the balance is essential. The rate-limit windows and the usage profile
+   * ride along under the same rule — they come from yet other endpoints, and
+   * none of the four takes the others down with it.
    *
    * @returns Whether the balance changed.
    */
@@ -841,6 +949,7 @@ export class MinimaxCredits {
     }
     await this.refreshLedger(credential, region, fetchImpl, now)
     await this.refreshRateLimit(credential, region, fetchImpl, now)
+    await this.refreshUsageProfile(credential, region, fetchImpl)
     return changed
   }
 
@@ -890,6 +999,26 @@ export class MinimaxCredits {
       this.#rateLimitAtMs = now
     } catch (error) {
       this.#rateLimitError = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  /**
+   * Read the account's usage profile.
+   *
+   * Same rule as the ledger: a failure is remembered but never thrown, and a
+   * profile that cannot be read leaves the last one on display.
+   */
+  async refreshUsageProfile(
+    credential: OAuthCredential,
+    region: MinimaxRegion,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<void> {
+    try {
+      const profile = await fetchUsageProfile(credential, region, fetchImpl)
+      this.#usageProfile = profile
+      this.#usageProfileError = undefined
+    } catch (error) {
+      this.#usageProfileError = error instanceof Error ? error.message : String(error)
     }
   }
 

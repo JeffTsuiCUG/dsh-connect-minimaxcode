@@ -26,6 +26,28 @@ export interface CatalogModel {
   inputModalities: string[]
   /** Whether the model accepts images at all. */
   attachment: boolean
+  /**
+   * Whether reasoning can be turned off for this model.
+   *
+   * Upstream states it per model in `thinking_config.mode`: a `switchable`
+   * model accepts `thinking: {type: "disabled"}`, a `forced_on` model refuses
+   * it with `400 ... requires adaptive thinking` (both measured against the live
+   * gateway on 2026-11-10). Absent means upstream did not say, which is read as
+   * "reasoning is mandatory".
+   */
+  reasoningOptional?: boolean
+  /**
+   * The reasoning effort levels upstream declares (`effort_options`).
+   *
+   * Recorded rather than acted on. pi-ai's own level mapping still dispatches
+   * the budget form (`thinking: {type: "enabled", budget_tokens}`) for these
+   * models, so naming the levels here changes no request; the names are kept
+   * so the information is not lost when it becomes usable. Reaching them on
+   * the wire would need pi-ai's `compat.forceAdaptiveThinking`, which switches
+   * the request to the adaptive form — a change of shape this plugin does not
+   * make on the strength of a catalog field alone.
+   */
+  effortLevels?: string[]
 }
 
 /** The provider block this plugin serves. */
@@ -48,6 +70,11 @@ export const MINIMAXCODE_PROVIDER_ID = 'minimaxcode'
  * reports: 512k is the billing tier boundary, and the gateway itself was
  * measured serving 946,206 tokens before refusing ~1,050,000 with
  * `invalid params, context window exceeds limit (2013)`.
+ *
+ * The reasoning modes are the upstream ones measured on 2026-11-10: `M3` is
+ * `switchable` and accepts `thinking: {type: "disabled"}`, `M3.1-Flash` is
+ * `forced_on` and refuses it. Encoding them here keeps the fallback honest
+ * about what the gateway accepts even when no catalog could be fetched.
  */
 export const FALLBACK_MODELS: readonly CatalogModel[] = [
   {
@@ -59,6 +86,7 @@ export const FALLBACK_MODELS: readonly CatalogModel[] = [
     reasoning: true,
     inputModalities: ['text', 'image', 'video'],
     attachment: true,
+    reasoningOptional: true,
   },
   {
     id: 'MiniMax-M3.1-Flash',
@@ -69,6 +97,7 @@ export const FALLBACK_MODELS: readonly CatalogModel[] = [
     reasoning: true,
     inputModalities: ['text', 'image', 'video'],
     attachment: true,
+    reasoningOptional: false,
   },
 ]
 
@@ -84,6 +113,12 @@ export interface CatalogSnapshot {
   error?: string
 }
 
+/** Whether two effort level lists name the same levels in the same order. */
+function sameEffortLevels(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
 /** Model with the same id, from a newer snapshot. */
 function sameCatalog(a: readonly CatalogModel[], b: readonly CatalogModel[]): boolean {
   if (a.length !== b.length) return false
@@ -95,6 +130,11 @@ function sameCatalog(a: readonly CatalogModel[], b: readonly CatalogModel[]): bo
       && model.toolCall === other.toolCall
       && model.reasoning === other.reasoning
       && model.attachment === other.attachment
+      // The reasoning mode and the effort levels are part of the descriptor
+      // upstream describes: a model that starts accepting a disabled thinking
+      // form, or starts declaring levels, publishes a different model.
+      && model.reasoningOptional === other.reasoningOptional
+      && sameEffortLevels(model.effortLevels, other.effortLevels)
     )
   })
 }
@@ -137,6 +177,41 @@ function readContextWindow(raw: Record<string, unknown>, limit: Record<string, u
   return typeof limit.context === 'number' ? limit.context : 200000
 }
 
+/**
+ * Read upstream's `thinking_config.mode`.
+ *
+ * `switchable` is the only mode whose reasoning can be turned off; every
+ * other value — including a missing block, which the gateway treats as
+ * mandatory reasoning — leaves the model's reasoning required.
+ *
+ * @param raw - The upstream model entry.
+ * @returns Whether reasoning is optional, or undefined when upstream said nothing.
+ */
+function readReasoningOptional(raw: Record<string, unknown>): boolean | undefined {
+  const config = (raw.thinking_config ?? {}) as Record<string, unknown>
+  const mode = config.mode
+  if (mode === 'switchable') return true
+  if (mode === 'forced_on') return false
+  return undefined
+}
+
+/**
+ * Read upstream's `effort_options`.
+ *
+ * The levels are recorded as upstream names them; nothing maps them onto a
+ * request yet, because pi-ai's level mapping dispatches the budget form for
+ * these models and the effort levels would need the adaptive form to travel.
+ *
+ * @param raw - The upstream model entry.
+ * @returns The declared levels, or undefined when upstream declares none.
+ */
+function readEffortLevels(raw: Record<string, unknown>): string[] | undefined {
+  const options = raw.effort_options
+  if (!Array.isArray(options)) return undefined
+  const names = options.filter((value): value is string => typeof value === 'string')
+  return names.length > 0 ? names : undefined
+}
+
 /** Read the fields the upstream sends, tolerating their absence. */
 function readModel(id: string, raw: Record<string, unknown>): CatalogModel {
   const limit = (raw.limit ?? {}) as Record<string, unknown>
@@ -152,6 +227,8 @@ function readModel(id: string, raw: Record<string, unknown>): CatalogModel {
     reasoning: raw.reasoning === true,
     inputModalities: input,
     attachment: raw.attachment === true || input.includes('image'),
+    reasoningOptional: readReasoningOptional(raw),
+    effortLevels: readEffortLevels(raw),
   }
 }
 
