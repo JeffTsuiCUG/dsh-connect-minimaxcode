@@ -208,7 +208,12 @@ declare class MinimaxCatalog {
 declare const MINIMAX_OAUTH_CLIENT_ID = "mcode-public";
 /** Membership endpoint: carries the credit summary. */
 declare const MEMBERSHIP_PATH = "/matrix/api/v1/commerce/get_membership_info";
-/** Rate-limit window endpoint: the 5-hour and weekly usage the plan meters. */
+/**
+ * Rate-limit window endpoint the plugin used first.
+ *
+ * Kept as a fallback for an account whose open platform hands out no plan
+ * key, since the documented path needs one.
+ */
 declare const REMAINS_PERCENT_PATH = "/backend/account/token_plan/remains_percent";
 /** The OAuth credential the account endpoints accept. */
 interface OAuthCredential {
@@ -371,7 +376,7 @@ interface RateLimitWindows {
  */
 declare function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined;
 /**
- * Fetch the plan's two rate-limit windows.
+ * Fetch the plan's two rate-limit windows from the older open-platform path.
  *
  * The endpoint lives on the open-platform host, like the usage summary, and
  * answers the same OAuth credential the membership endpoint takes. The JWT the
@@ -380,6 +385,15 @@ declare function parseRateLimitWindows(document: unknown): RateLimitWindows | un
  * @returns The windows, or `undefined` when the response carries none.
  */
 declare function fetchRateLimitWindows(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<RateLimitWindows | undefined>;
+/** What a quota read found. */
+interface RateLimitRead {
+  /** The windows, when the plan meters any. */
+  windows?: RateLimitWindows;
+  /** Why there are none, when the upstream said so plainly. */
+  absence?: 'no-subscription';
+  /** Why the read failed, when it did. */
+  error?: string;
+}
 /** What the lots say about credits that are about to be lost. */
 interface ExpirySummary {
   /** Credits in lots that expire within {@link EXPIRING_WINDOW_DAYS} days. */
@@ -422,6 +436,8 @@ declare class MinimaxCredits {
   get rateLimit(): RateLimitWindows | undefined;
   /** Why the windows could not be read, when they could not. */
   get rateLimitError(): string | undefined;
+  /** Why the plan has no windows, when the upstream said so plainly. */
+  get rateLimitAbsence(): 'no-subscription' | undefined;
   /** When the windows were last read. */
   get rateLimitAtMs(): number | undefined;
   /**
@@ -451,6 +467,15 @@ declare class MinimaxCredits {
    * window that cannot be read leaves the last one on display.
    */
   refreshRateLimit(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch, now?: number): Promise<void>;
+  /**
+   * Read the windows from whichever endpoint can answer.
+   *
+   * The documented endpoint needs the open platform's plan key, which the
+   * same platform hands out; the key is remembered because it does not
+   * change from one read to the next. An account with no key at all still
+   * gets the older path's answer.
+   */
+  readWindows(credential: OAuthCredential, region: MinimaxRegion, fetchImpl?: typeof fetch): Promise<RateLimitRead>;
 }
 //#endregion
 //#region src/usage.d.ts
@@ -910,6 +935,8 @@ interface RateLimitStatus {
   };
   /** When the windows were read, in milliseconds since the epoch. */
   updatedAtMs?: number;
+  /** Why the plan has no windows, when the upstream said so plainly. */
+  reason?: 'no-subscription';
   /** Why the windows could not be read. */
   error?: string;
 }

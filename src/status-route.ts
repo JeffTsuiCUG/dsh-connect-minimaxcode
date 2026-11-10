@@ -127,6 +127,8 @@ export interface RateLimitStatus {
   weekly?: { usedPercent: number; startAtMs: number; resetAtMs: number }
   /** When the windows were read, in milliseconds since the epoch. */
   updatedAtMs?: number
+  /** Why the plan has no windows, when the upstream said so plainly. */
+  reason?: 'no-subscription'
   /** Why the windows could not be read. */
   error?: string
 }

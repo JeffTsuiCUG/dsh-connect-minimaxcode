@@ -399,7 +399,10 @@ function apply(ctx: Context) {
     // The account API answers a refused token with `401`. That is the one
     // signal that the credential itself is the problem, and the balance, the
     // ledger and the rate-limit window all carry it, so any of them counts.
-    const refused = [credits.error, credits.ledgerError, credits.rateLimitError]
+    // The quota endpoint is deliberately left out: it is asked with the
+    // open platform's plan key, so a 401 there says the key is wrong, not
+    // that the person's own credential was revoked.
+    const refused = [credits.error, credits.ledgerError]
       .find(message => isUnauthorized(message))
     if (refused !== undefined) {
       await revokePluginCredential()
@@ -521,7 +524,11 @@ function apply(ctx: Context) {
     }
     const windows = credits.rateLimit
     if (windows === undefined) {
-      return { state: 'unavailable', ...credits.rateLimitError === undefined ? {} : { error: credits.rateLimitError } }
+      return {
+        state: 'unavailable',
+        ...credits.rateLimitAbsence === undefined ? {} : { reason: credits.rateLimitAbsence },
+        ...credits.rateLimitError === undefined ? {} : { error: credits.rateLimitError },
+      }
     }
     return {
       state: 'ok',

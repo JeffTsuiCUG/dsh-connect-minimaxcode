@@ -65,7 +65,26 @@ export const CREDIT_DETAILS_PATH = '/minimax-cloud/api/v1/credit/details'
 /** Per-model token usage summary (open platform). */
 export const USAGE_SUMMARY_PATH = '/backend/account/token_plan/usage_summary'
 
-/** Rate-limit window endpoint: the 5-hour and weekly usage the plan meters. */
+/** Open-platform credit endpoint that carries the account's plan key. */
+export const TOKEN_PLAN_CREDIT_PATH = '/backend/account/token_plan_credit'
+
+/**
+ * Rate-limit window endpoint, as the open platform documents it.
+ *
+ * The M Plan FAQ names `GET /v1/token_plan/remains` as the way to read the
+ * quota over HTTP. It asks for an API secret key rather than the desktop
+ * app's OAuth bearer, and it is the path the upstream still maintains: the
+ * older path this plugin started with now answers 200 with an empty body
+ * even for accounts that do have windows.
+ */
+export const TOKEN_PLAN_REMAINS_PATH = '/v1/token_plan/remains'
+
+/**
+ * Rate-limit window endpoint the plugin used first.
+ *
+ * Kept as a fallback for an account whose open platform hands out no plan
+ * key, since the documented path needs one.
+ */
 export const REMAINS_PERCENT_PATH = '/backend/account/token_plan/remains_percent'
 
 /** OAuth token endpoint. */
@@ -567,7 +586,7 @@ function parsePercent(value: unknown): number | undefined {
 }
 
 /**
- * Fetch the plan's two rate-limit windows.
+ * Fetch the plan's two rate-limit windows from the older open-platform path.
  *
  * The endpoint lives on the open-platform host, like the usage summary, and
  * answers the same OAuth credential the membership endpoint takes. The JWT the
@@ -588,6 +607,88 @@ export async function fetchRateLimitWindows(
     throw new Error(`rate-limit window request failed: HTTP ${response.status}`)
   }
   return parseRateLimitWindows(await response.json())
+}
+
+/**
+ * Read the open platform's plan key.
+ *
+ * The documented quota endpoint wants an API secret key, and the open
+ * platform is where the account's key comes from: the desktop app asks the
+ * same endpoint with its OAuth bearer and gets the key back in the answer,
+ * so the key is a property of the account rather than something the person
+ * has to configure.
+ *
+ * @returns The key, or `undefined` when the account has none.
+ */
+export async function fetchTokenPlanApiKey(
+  credential: OAuthCredential,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | undefined> {
+  const url = `${MINIMAX_OPEN_HOSTS[region]}${TOKEN_PLAN_CREDIT_PATH}?business=Agent&device_platform=desktop`
+  const response = await fetchImpl(url, {
+    headers: { accept: 'application/json', authorization: `Bearer ${credential.token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`token plan credit request failed: HTTP ${response.status}`)
+  }
+  const document = (await response.json()) as Record<string, unknown>
+  const key = document.api_key
+  return typeof key === 'string' && key.length > 0 ? key : undefined
+}
+
+/** What a quota read found. */
+export interface RateLimitRead {
+  /** The windows, when the plan meters any. */
+  windows?: RateLimitWindows
+  /** Why there are none, when the upstream said so plainly. */
+  absence?: 'no-subscription'
+  /** Why the read failed, when it did. */
+  error?: string
+}
+
+/** The upstream's own code for "this account has no plan subscription". */
+const NO_SUBSCRIPTION_CODE = 2062
+
+/** The upstream's own code for "the request carried no usable API key". */
+const MISSING_API_KEY_CODE = 1004
+
+/** The upstream's status code inside a response body, when it carries one. */
+function readBaseRespCode(document: Record<string, unknown>): number | undefined {
+  const base = document.base_resp
+  if (typeof base !== 'object' || base === null) return undefined
+  const code = (base as Record<string, unknown>).status_code
+  return typeof code === 'number' ? code : undefined
+}
+
+/**
+ * Read the windows from the documented quota endpoint.
+ *
+ * The upstream says plainly when there is nothing to report: `2062` means
+ * the account has no plan subscription, and the quota does not exist for it
+ * at all. That is a fact about the plan rather than a failure to read, so
+ * it is reported as such and not as an error — the windows of a plan the
+ * account does not hold are not missing data.
+ */
+export async function fetchTokenPlanWindows(
+  apiKey: string,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<RateLimitRead> {
+  const url = `${MINIMAX_OPEN_HOSTS[region]}${TOKEN_PLAN_REMAINS_PATH}`
+  const response = await fetchImpl(url, {
+    headers: { accept: 'application/json', authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+  })
+  if (!response.ok) {
+    throw new Error(`rate-limit window request failed: HTTP ${response.status}`)
+  }
+  const document = (await response.json()) as Record<string, unknown>
+  const code = readBaseRespCode(document)
+  if (code === NO_SUBSCRIPTION_CODE) return { absence: 'no-subscription' }
+  if (code === MISSING_API_KEY_CODE) return { error: 'the open platform did not accept the plan key' }
+  const windows = parseRateLimitWindows(document)
+  if (windows === undefined) return { error: 'response carried no rate-limit windows' }
+  return { windows }
 }
 
 /** How many days of expiry the plugin calls "about to expire". */
@@ -649,7 +750,9 @@ export class MinimaxCredits {
   #ledgerError: string | undefined
   #rateLimit: RateLimitWindows | undefined
   #rateLimitError: string | undefined
+  #rateLimitAbsence: 'no-subscription' | undefined
   #rateLimitAtMs: number | undefined
+  #apiKey: string | undefined
 
   /** The balance as last read. */
   get snapshot(): CreditSnapshot | undefined {
@@ -689,6 +792,11 @@ export class MinimaxCredits {
   /** Why the windows could not be read, when they could not. */
   get rateLimitError(): string | undefined {
     return this.#rateLimitError
+  }
+
+  /** Why the plan has no windows, when the upstream said so plainly. */
+  get rateLimitAbsence(): 'no-subscription' | undefined {
+    return this.#rateLimitAbsence
   }
 
   /** When the windows were last read. */
@@ -773,12 +881,46 @@ export class MinimaxCredits {
     now = Date.now(),
   ): Promise<void> {
     try {
-      const windows = await fetchRateLimitWindows(credential, region, fetchImpl)
-      this.#rateLimit = windows
-      this.#rateLimitError = windows === undefined ? 'response carried no rate-limit windows' : undefined
+      const read = await this.readWindows(credential, region, fetchImpl)
+      // A read that failed keeps the last windows on display; a read that
+      // succeeded replaces them, including with none when the plan has none.
+      if (read.error === undefined) this.#rateLimit = read.windows
+      this.#rateLimitAbsence = read.absence
+      this.#rateLimitError = read.error
       this.#rateLimitAtMs = now
     } catch (error) {
       this.#rateLimitError = error instanceof Error ? error.message : String(error)
     }
+  }
+
+  /**
+   * Read the windows from whichever endpoint can answer.
+   *
+   * The documented endpoint needs the open platform's plan key, which the
+   * same platform hands out; the key is remembered because it does not
+   * change from one read to the next. An account with no key at all still
+   * gets the older path's answer.
+   */
+  async readWindows(
+    credential: OAuthCredential,
+    region: MinimaxRegion,
+    fetchImpl: typeof fetch = fetch,
+  ): Promise<RateLimitRead> {
+    const apiKey = this.#apiKey ?? (await fetchTokenPlanApiKey(credential, region, fetchImpl))
+    this.#apiKey = apiKey
+    if (apiKey !== undefined) {
+      try {
+        return await fetchTokenPlanWindows(apiKey, region, fetchImpl)
+      } catch (error) {
+        // The documented path could not answer. The older one still might.
+        const legacy = await fetchRateLimitWindows(credential, region, fetchImpl)
+        if (legacy !== undefined) return { windows: legacy }
+        throw error
+      }
+    }
+    const legacy = await fetchRateLimitWindows(credential, region, fetchImpl)
+    return legacy === undefined
+      ? { error: 'response carried no rate-limit windows' }
+      : { windows: legacy }
   }
 }

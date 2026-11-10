@@ -308,6 +308,14 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.5.7 (2026-11-10)
+
+- **The quota readout now uses the open platform's documented endpoint**: the plugin read `/backend/account/token_plan/remains_percent`, and that path now answers every account with an empty `success` — it no longer even carries a `model_remains` field — so the readout showed nothing for anyone and said nothing about why. It now reads `GET /v1/token_plan/remains`, the endpoint the open platform's own M Plan documentation names. That endpoint asks for the **open platform's API key** rather than the OAuth bearer; the key comes from the `token_plan_credit` response and is remembered between reads.
+- **"No subscription" is no longer reported as a failed read**: upstream answers an account without an M Plan subscription with `2062 no active token plan subscription` — credit packages carry no rolling windows of their own. The plugin now reports that as what it is. The balance, the check-in and the model calls are untouched by it.
+- The older path is kept as a **fallback**: an account whose open platform hands out no key still gets whatever the old path can give.
+- Fixed a misfire that came with it: the quota endpoint is asked with the open platform's plan key, so a 401 there means the *key* is wrong, not that the person's credential was revoked. It used to feed the "was this credential revoked" check, which could sign someone out over a bad key. That check now reads only the account-domain endpoints (membership and credit ledger).
+- Added `tests/quota-endpoint.spec.ts` (13 cases) pinning: how the plan key is obtained, the documented endpoint being asked with the key rather than the OAuth bearer, `2062` counted as "no subscription" rather than an error, the fallback to the older path when there is no key, and the key being fetched once. All 209 cases pass.
+
 ### 0.5.6 (2026-11-09)
 
 - **Fixed "every model request fails while credits and check-in still work"**: the two features read two different credential files. The model gateway only knew the plugin's own sign-in and the **legacy JWT** an older desktop app left behind (`local-runtime.auth.json`), while current installs store an OAuth grant instead (`auth/prod/<region>/mcode-public/auth.json`, an `mmoat_` token). Once the legacy JWT expired, the gateway answered every request with `401 auth failed` — and because credits read the OAuth file, the card showed a healthy balance beside a dead model. The gateway now tries, in order: the plugin's own sign-in → **the desktop app's OAuth grant** → the legacy JWT, taking the first that works.

@@ -3,7 +3,7 @@
 把本机已登录的 **MiniMax Code 桌面 App（国内版）** 的模型接入 **DeepSeek Harness（DSH）**，装好即用，无需配置 API Key。
 
 ![license](https://img.shields.io/badge/license-MIT-blue.svg)
-[![version](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
+[![version](https://img.shields.io/npm/v/dsh-connect-minimaxcode?color=cb3837)](https://www.npmjs.com/package/dsh-connect-minimaxcode)
 [![CI](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml/badge.svg)](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/actions/workflows/ci.yml)
 
 [English](README.en.md) | 简体中文
@@ -291,12 +291,16 @@ GET https://agent.minimax.cn/minimax-cloud/api/v1/credit/details?page_number=1&p
 
 ### 限额窗口（套餐的两个滚动窗口）
 
-套餐用量按两个滚动窗口计量（当前套餐为 5 小时与 7 天），插件会显示各窗口的已用百分比与重置倒计时：
+套餐用量按两个滚动窗口计量（当前套餐为 5 小时与 7 天），插件会显示各窗口的已用百分比与重置倒计时。
+
+读取走**开放平台官方文档给出的接口**（M Plan 用量说明页「如何查看 M Plan 用量 → 方式三：使用 API 接口查询」）：
 
 ```
-GET https://www.minimaxi.com/backend/account/token_plan/remains_percent?business=Agent&device_platform=desktop
-Authorization: Bearer <OAuth 令牌>
+GET https://www.minimaxi.com/v1/token_plan/remains
+Authorization: Bearer <API Key>
 ```
+
+该接口要的是**开放平台的 API 密钥**，不是 OAuth 令牌。密钥由账户自己持有，取法与桌面 App 相同 —— 用 OAuth 令牌请求 `GET /backend/account/token_plan_credit?business=Agent&device_platform=desktop`，响应里的 `api_key` 就是它。
 
 ```json
 "model_remains": [{
@@ -312,7 +316,7 @@ Authorization: Bearer <OAuth 令牌>
 
 - **窗口时长不写死**：从响应自身的起止字段推导（实测恰为 5 小时与 7 天），套餐条款变了显示会跟着变 —— 胶囊与详情行上的窗口名（`5h`、`7d`）也是这么来的，不是写死的字面量
 - **无限量的窗口不报百分比**：上游用 `current_*_status` 标出没有额度的窗口（桌面 App 读作 `isUnlimited: 3 === status`），这类窗口不参与显示，避免出现「0%」这种没人能据此行动的读数
-- **该接口在开放平台域**（`www.minimaxi.com`），只认 OAuth 令牌；JWT 打它返回 `1016 invalid api key`
+- **没有订阅就没有窗口，且这不算错误**：上游对未订阅 M Plan 的账户明确回 `2062 no active token plan subscription`，插件会如实标为「无订阅」而不是「读取失败」—— 积分包本身不带滚动窗口
 - **接口异常时其余显示不受影响**：限额读不到，胶囊与卡片仍显示余额、签到与本机用量
 - 上游还发 `current_*_count` 计数字段（无计数制时为 `-1`），插件只读百分比与起止时刻
 ### 关于续期
@@ -339,6 +343,14 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.5.7（2026-11-10）
+
+- **限额窗口改走官方文档接口**：原先读的是 `/backend/account/token_plan/remains_percent`，这条路径现在对任何账户都只回一个空的 `success`（连 `model_remains` 字段都没有），于是限额一栏对所有人都显示不出来，却看不出原因。改用开放平台官方文档（M Plan 用量说明页）给出的 `GET /v1/token_plan/remains`。新接口要求**开放平台 API 密钥**而非 OAuth 令牌，密钥取自 `token_plan_credit` 的响应并缓存复用。
+- **「没有订阅」不再被报成「读取失败」**：上游对未订阅 M Plan 的账户明确回 `2062 no active token plan subscription` —— 积分包本身不带 5 小时 / 周滚动窗口。插件现在把这种情况标为「无订阅」，余额、签到与模型调用不受任何影响。
+- 旧路径保留为**兜底**：账户若拿不到开放平台密钥，仍走旧路径，不会因此彻底没有限额显示。
+- 顺带修正一处误伤可能：限额接口是拿开放平台密钥问的，它回 401 说明的是密钥不对，**不是本人凭据被吊销**；此前它参与「凭据是否被吊销」的判断，可能把人误登出。现在该判断只看账户域接口（会员信息与积分流水）的 401。
+- 新增 `tests/quota-endpoint.spec.ts`（13 个用例）钉住：计划密钥的取法、官方接口用密钥而非 OAuth 令牌请求、`2062` 归为「无订阅」而非错误、无密钥时回落旧路径、密钥只取一次。全量 209 个用例通过。
 
 ### 0.5.6（2026-11-09）
 

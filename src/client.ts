@@ -97,6 +97,7 @@ interface StatusDocument {
     interval?: { usedPercent: number; startAtMs: number; resetAtMs: number }
     weekly?: { usedPercent: number; startAtMs: number; resetAtMs: number }
     updatedAtMs?: number
+    reason?: 'no-subscription'
     error?: string
   }
   signin?: {
