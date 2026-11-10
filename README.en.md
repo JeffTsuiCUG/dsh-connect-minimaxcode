@@ -327,6 +327,11 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.5.9 (2026-11-10)
+
+- **README**: every reference to a repository that no longer exists (it now answers 404) is gone — the inspiration section, the sibling-plugin table and its section, and the acknowledgements. The practice it established and the sibling projects that followed it are still described, and every repository link left in the README was checked to be alive.
+- **README**: the marketplace section now states the situation as it stands — all twelve listing pull requests are closed, the forks opened for them are cleaned up, those directories are not being worked on, and distribution runs through npm and this repository's releases. The two registries that still carry an entry (the official registry and dshbase) are still listed. The npm package ships the README, so this change needs a release to reach the package page.
+
 ### 0.5.8 (2026-11-10)
 
 - **Fixed "M3's reasoning could not be turned off"**: the plugin used to declare "reasoning cannot be disabled" for *every* reasoning model, on the grounds that the gateway refuses `thinking: {type: "disabled"}` with `400 ... requires adaptive thinking`. That refusal only holds for a `forced_on` model: the upstream catalog states `thinking_config.mode` per model, and `MiniMax-M3` is `switchable` (measured: the disabled form is accepted, 200) while `MiniMax-M3.1-Flash` is `forced_on` (measured: 400). Each model is now handled as upstream describes it: **M3's reasoning levels now include "off"**, and picking it really does stop the reasoning — fewer tokens, lower latency. M3.1-Flash is unchanged and the option still does not appear.
