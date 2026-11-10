@@ -10,19 +10,17 @@ Bring the models of the **MiniMax Code desktop app (China region)**, already sig
 
 ## Inspiration
 
-The idea for this plugin came from **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** (by Corrine Hu).
+The community established the route this plugin follows: **a model already signed in on a desktop app can be moved into DSH with zero configuration** — no handling of accounts or passwords, no new authentication scheme; it just attaches a provider to the login state the machine already has and reuses DSH's built-in provider adapter. This plugin applies the same approach to MiniMax Code:
 
-That project was the first to show that **a model already signed in on a desktop app can be moved into DSH with zero configuration** — no handling of accounts or passwords, no new authentication scheme; it just attaches a provider to the login state the machine already has and reuses DSH's built-in provider adapter. This plugin applies the same approach to MiniMax Code:
-
-| | dsh-workbuddy-connect | This plugin |
+| | Sibling plugins | This plugin |
 |---|---|---|
-| Data source | Local login state of the WorkBuddy desktop app | Local login state of the MiniMax Code desktop app |
+| Data source | Local login state of their own desktop app | Local login state of the MiniMax Code desktop app |
 | Integration | Registers a DSH provider and exposes the already-signed-in models | Same |
 | Catalog source | Live model list from upstream | Same |
 
-Another implementation in the same direction is **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)**; for **how the plugin is structured and how the provider is registered**, this plugin also follows the same author's [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) (whose connection core itself references corrinehu's implementation — see the acknowledgements in its README).
+Several implementations exist in the same direction; for **how the plugin is structured and how the provider is registered**, this plugin follows **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** and the same author's [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae).
 
-> The two differ in this way: **corrinehu was the original pioneer** — the "reuse the local login state" route was established by that project; **dingminhua's implementation follows the existing conventions of the DSH plugin structure more closely**, and this plugin's directory layout and `cordis.patch.yml` follow the latter. Both are credited at the end of this document.
+> These projects are developed independently and are not affiliated with this one. This plugin's directory layout and `cordis.patch.yml` follow the existing conventions of the DSH plugin structure.
 
 ---
 
@@ -425,30 +423,25 @@ For earlier versions, see [GitHub Releases](https://github.com/JeffTsuiCUG/dsh-c
 
 ## Marketplace listing and presentation
 
-The plugin ships an installable `dsh.bundle` manifest and is published to npm. The directory of the community plugin marketplace (`dshmarket`) is generated from the [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) registry, and this plugin's listing has been submitted as PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110). A draft and the operating notes are kept in the repository: [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/).
+The plugin ships an installable `dsh.bundle` manifest and is published to npm — **npm is the installation path**:
 
-**Other directories and marketplaces** (entries submitted or already listed, text refreshed to 0.5.1):
+```bash
+dsh plugin --profile desktop add dsh-connect-minimaxcode
+```
+
+The directory of the community plugin marketplace (`dshmarket`) is generated from the [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) registry, and this plugin's entry is in it ([#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110) listed, [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) refreshed), so it also shows up in the DSH plugin centre.
+
+**Other directories**: entries were submitted to several awesome lists as well, but those projects see little maintenance; the entries and the forks opened for them have been cleaned up and are **no longer maintained**. Distribution runs through npm and this repository's Releases. The original draft and the submission notes are kept in the repository: [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/), in case they are ever needed again.
 
 | Channel | State |
 |---|---|
-| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) (the registry) | Listed; entry refresh PR [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) |
-| [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) | PR [#727](https://github.com/0xsline/awesome-deepseek-harness/pull/727) |
-| [Awesome-DeepSeek-Harness-Plugins](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins) | PR [#92](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins/pull/92) |
-| [dsh-suite](https://github.com/whyihaveyou/dsh-suite) | PR [#66](https://github.com/whyihaveyou/dsh-suite/pull/66) |
-| [awesome-dsh-plugins](https://github.com/kejixiaoliang/awesome-dsh-plugins) | PR [#143](https://github.com/kejixiaoliang/awesome-dsh-plugins/pull/143) |
-| [awesome-dsh-plugins](https://github.com/dshworks/awesome-dsh-plugins) | PR [#176](https://github.com/dshworks/awesome-dsh-plugins/pull/176) |
-| [awesome-deepseek-harness](https://github.com/awesome-deepseekharness/awesome-deepseek-harness) | PR [#177](https://github.com/awesome-deepseekharness/awesome-deepseek-harness/pull/177) |
-| [dsh-plugin-radar](https://github.com/AdamPlatin123/dsh-plugin-radar) | PR [#964](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/964) |
-| [dsh-community-plugins](https://github.com/zhu1090093659/dsh-community-plugins) | PR [#46](https://github.com/zhu1090093659/dsh-community-plugins/pull/46) |
-| [dsh-plugin.org](https://github.com/dshplugin/dsh-plugin-hub) | Listed (automatic scan; the npm package shows up in the DSH plugin centre) |
-| [dshbase](https://github.com/ylwl1997/dshbase) | Listed |
-| [awesome-deepseek-harness-plugins](https://github.com/walkinglabs/awesome-deepseek-harness-plugins) | PR [#117](https://github.com/walkinglabs/awesome-deepseek-harness-plugins/pull/117) |
-| [awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness) | PR [#663](https://github.com/Dominic789654/awesome-deepseek-harness/pull/663) |
-| [awesome-deepseek-harness-plugins](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) | PR [#660](https://github.com/imsai-sh/awesome-deepseek-harness-plugins/pull/660) |
+| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) (the registry behind `dshmarket`) | Listed |
+| [dshbase](https://github.com/ylwl1997/dshbase) | Listed (automatic scan) |
+| Other awesome lists | No longer maintained; entries and forks cleaned up |
 
 Marketplace screenshots are declared, per the current convention, by the **`screenshots.json` in the plugin's own repository root** (the registry's `data/screenshots.json` is a fallback from the old convention, and no new keys are added there). This repository **does not ship screenshots yet**, so the file does not exist; once there are some, put `screenshots.json` in the repository root (an array of relative image paths) and the marketplace card will pick them up.
 
-> **Since 0.5.1 the readout lives in the composer tool row (beside the model picker) and is gated by the host's `modelSelection` projection**: the balance belongs to the provider the next request will actually use, so it sits where that selection is made — and it hides entirely, polling included, when another connector's model (workbuddy, for example) is selected. This follows `dsh-connect-trae`, whose `ComposerPointsGate` returns null for every provider but its own.
+> **Since 0.5.1 the readout lives in the composer tool row (beside the model picker) and is gated by the host's `modelSelection` projection**: the balance belongs to the provider the next request will actually use, so it sits where that selection is made — and it hides entirely, polling included, when another connector's model (dsh-connect-workbuddy, for example) is selected. This follows `dsh-connect-trae`, whose `ComposerPointsGate` returns null for every provider but its own.
 >
 > The tool row is a shared slot and can in principle be crowded out (a sibling plugin lost a reading this way in `workbuddy` issue #62; trae's answer is a second seat). **This plugin registers the tool-row seat only**; the ambient dock is a proven fallback should crowding ever occur.
 
@@ -485,7 +478,6 @@ These plugins follow the same idea — **reuse the login state your local deskto
 |---|---|---|---|
 | **dsh-connect-trae** | Trae (China + international) | ✅ China region | ✅ Work / general credit overview |
 | **dsh-qoder-connect** | Qoder (China + international, PAT) | ✅ 100 Credits per day | ✅ Sidebar quota card + breakdown |
-| **dsh-workbuddy-connect** | WorkBuddy (China + international) | — | ✅ Remaining credits + breakdown |
 
 > Each plugin's check-in rules, quota basis and limitations are defined by its own documentation. The readings above come from the same machine and only represent the state at that time; they are not a promise.
 
@@ -505,16 +497,6 @@ Connects Qoder through a personal access token (PAT), with independent configura
 dsh plugin --profile desktop add dsh-qoder-connect
 ```
 
-### [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)
-
-Connects the WorkBuddy desktop app; the China and international versions can coexist, each using its own account and its own credits. It shows the account information, token validity and remaining credits, and ships a CLI:
-
-```bash
-dsh plugin --profile web exec dsh-workbuddy-connect status
-```
-
-> This plugin's version must match your DSH core exactly (each core line uses a different version); see the version table in its README before installing.
-
 ## Contributors
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** — raised the request for a plugin-page icon and Chinese/English copy ([#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)). It became 0.5.2: the plugin page has its own SVG artwork, the title and the introduction come in both languages, and the interface follows the host's language.
@@ -524,8 +506,7 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 
 ## Acknowledgements
 
-- **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** — **the inspiration for this plugin**. The overall idea of "reuse the desktop app's local login state and bring the already-signed-in model into DSH" was established first by that project, and this plugin follows the same approach; the read-only reuse of credentials was designed with it in mind.
-- **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — another implementation in the same direction; this plugin's **plugin structure and provider registration** follow it (its connection core also references corrinehu's implementation — see that project's acknowledgements).
+- **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — another implementation in the same direction; this plugin's **plugin structure and provider registration** follow it.
 - [dingminhua/dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — the same author's DSH plugin, useful as a reference for the DSH plugin structure.
 
 > The projects listed under "Similar plugins" are the work of independent developers. They are not affiliated with or endorsed by this project, and each one follows its own license and disclaimer.

@@ -10,19 +10,17 @@
 
 ## 灵感来源
 
-本插件的思路来自 **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)**（作者 Corrine Hu）。
+社区先走通了这样一条路：**桌面 App 已经登录的模型，可以零配置地搬进 DSH** —— 不去碰账号密码，不引入新的鉴权体系，只是把本机已有的登录态接上一个 provider，并复用 DSH 自带的 provider 适配器。本插件把同一套做法用在了 MiniMax Code 上：
 
-它最早证明了这样一件事：**桌面 App 已经登录的模型，可以零配置地搬进 DSH**——不去碰账号密码，不引入新的鉴权体系，只是把本机已有的登录态接上一个 provider，并复用 DSH 自带的 provider 适配器。本插件把同一套做法用在了 MiniMax Code 上：
-
-| | dsh-workbuddy-connect | 本插件 |
+| | 同类插件 | 本插件 |
 |---|---|---|
-| 数据来源 | WorkBuddy 桌面 App 的本地登录态 | MiniMax Code 桌面 App 的本地登录态 |
+| 数据来源 | 各自桌面 App 的本地登录态 | MiniMax Code 桌面 App 的本地登录态 |
 | 接入方式 | 注册 DSH provider，暴露已登录模型 | 同左 |
 | 目录来源 | 上游实时模型列表 | 同左 |
 
-同方向的另一实现是 **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)**，本插件在**插件结构与 provider 注册的组织方式**上参考了同一作者的 [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae)（该项目的连接内核本身也参照了 corrinehu 的实现，见其 README 致谢）。
+同方向已有多个实现，本插件在**插件结构与 provider 注册的组织方式**上参考了 **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** 与同一作者的 [dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae)。
 
-> 两者的价值可以这样区分：**corrinehu 是最早的开创者**，「复用本机登录态」的路线由它确立；**dingminhua 的实现更贴近 DSH 插件结构的既有约定**，本插件的目录布局与 `cordis.patch.yml` 写法沿用了后者。二者都已列入文末致谢。
+> 同类项目各自独立开发，与本项目无隶属关系。本插件的目录布局与 `cordis.patch.yml` 写法沿用了 DSH 插件结构的既有约定。
 
 ---
 
@@ -417,7 +415,7 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ### 0.5.1（2026-10-20）
 
-- **余额读数跟随所选模型**：从输入框下方的 dock 移到**输入框工具行（模型选择器旁）**，并按宿主 `modelSelection` 投影门控 —— **只有选中 `minimaxcode` 模型时才显示**；切到其他反代插件（如 workbuddy）的模型即整体隐藏，且不轮询（学习 `dsh-connect-trae` 的做法）。
+- **余额读数跟随所选模型**：从输入框下方的 dock 移到**输入框工具行（模型选择器旁）**，并按宿主 `modelSelection` 投影门控 —— **只有选中 `minimaxcode` 模型时才显示**；切到其他反代插件（如 dsh-connect-workbuddy）的模型即整体隐藏，且不轮询（学习 `dsh-connect-trae` 的做法）。
 - **`engines.dsh` 收窄为 `>=0.2.1-rc.2 <0.3.0-0`**：只声明实测过的档位，此前的 `>=0.1.7-rc.1` 覆盖过宽。
 
 ### 0.5.0（2026-10-20）
@@ -463,26 +461,21 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 市场收录与展示
 
-插件已包含可安装的 `dsh.bundle` manifest，并发布到 npm。社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的收录条目已提交为 PR [#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110)，仓库内保留了一份草稿与操作说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)。
+插件已包含可安装的 `dsh.bundle` manifest，并发布到 npm —— **安装方式以 npm 为准**：
 
-**其它目录 / 市场的收录**（条目已提交或已上线，内容随版本更新到 0.5.1）：
+```bash
+dsh plugin --profile desktop add dsh-connect-minimaxcode
+```
+
+社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的条目已在该注册表中（[#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110) 收录、[#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) 更新），因此也会出现在 DSH 的插件中心里。
+
+**其它目录**：此前也向若干 awesome 清单提交过收录条目，但那些项目的更新活跃度很低，条目与为此开的分叉都已清理完毕，**不再维护**。插件的分发以 npm 与本仓库的 Releases 为准。仓库内保留了一份当初的草稿与提交说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)，供日后需要时参考。
 
 | 渠道 | 状态 |
 |---|---|
-| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（官方注册表） | ✅ 已收录；条目更新 PR [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) |
-| [awesome-deepseek-harness](https://github.com/0xsline/awesome-deepseek-harness) | PR [#727](https://github.com/0xsline/awesome-deepseek-harness/pull/727) |
-| [Awesome-DeepSeek-Harness-Plugins](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins) | PR [#92](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins/pull/92) |
-| [dsh-suite](https://github.com/whyihaveyou/dsh-suite) | PR [#66](https://github.com/whyihaveyou/dsh-suite/pull/66) |
-| [awesome-dsh-plugins](https://github.com/kejixiaoliang/awesome-dsh-plugins) | PR [#143](https://github.com/kejixiaoliang/awesome-dsh-plugins/pull/143) |
-| [awesome-dsh-plugins](https://github.com/dshworks/awesome-dsh-plugins) | PR [#176](https://github.com/dshworks/awesome-dsh-plugins/pull/176) |
-| [awesome-deepseek-harness](https://github.com/awesome-deepseekharness/awesome-deepseek-harness) | PR [#177](https://github.com/awesome-deepseekharness/awesome-deepseek-harness/pull/177) |
-| [dsh-plugin-radar](https://github.com/AdamPlatin123/dsh-plugin-radar) | PR [#964](https://github.com/AdamPlatin123/dsh-plugin-radar/pull/964) |
-| [dsh-community-plugins](https://github.com/zhu1090093659/dsh-community-plugins) | PR [#46](https://github.com/zhu1090093659/dsh-community-plugins/pull/46) |
-| [dsh-plugin.org](https://github.com/dshplugin/dsh-plugin-hub) | ✅ 已收录（自助扫描，会随目录更新出现在 DSH「插件中心」） |
-| [dshbase](https://github.com/ylwl1997/dshbase) | ✅ 已收录 |
-| [awesome-deepseek-harness-plugins](https://github.com/walkinglabs/awesome-deepseek-harness-plugins) | PR [#117](https://github.com/walkinglabs/awesome-deepseek-harness-plugins/pull/117) |
-| [awesome-deepseek-harness](https://github.com/Dominic789654/awesome-deepseek-harness) | PR [#663](https://github.com/Dominic789654/awesome-deepseek-harness/pull/663) |
-| [awesome-deepseek-harness-plugins](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) | PR [#660](https://github.com/imsai-sh/awesome-deepseek-harness-plugins/pull/660) |
+| [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（官方注册表，`dshmarket` 目录来源） | ✅ 已收录 |
+| [dshbase](https://github.com/ylwl1997/dshbase) | ✅ 已收录（自动扫描） |
+| 其它 awesome 清单 | 已停止维护，条目与分叉已清理 |
 
 市场截图按当前约定由**插件自己仓库根目录的** `screenshots.json` 声明（注册表 `data/screenshots.json` 是旧约定下的回退，不再新增键）。本仓库目前**尚未提供截图**，所以还没有这个文件；补上截图后，在根目录放 `screenshots.json`（内容是图片相对路径的数组）即可被市场卡片取用。
 
@@ -523,7 +516,6 @@ pnpm build && git add lib
 |---|---|---|---|
 | **dsh-connect-trae** | Trae（国内版 + 国际版） | ✅ 国内版 | ✅ Work / 通用积分概览 |
 | **dsh-qoder-connect** | Qoder（国内版 + 国际版，PAT） | ✅ 每日 100 Credits | ✅ 侧栏额度小卡 + 明细 |
-| **dsh-workbuddy-connect** | WorkBuddy（国内版 + 国际版） | — | ✅ 剩余积分 + 明细 |
 
 > 各插件的签到规则、额度口径与限制以各自文档为准。下表为同一台机器上的实测读数，仅代表当时状态，非承诺。
 
@@ -543,16 +535,6 @@ dsh plugin --profile desktop add dsh-connect-trae
 dsh plugin --profile desktop add dsh-qoder-connect
 ```
 
-### [dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)
-
-接入 WorkBuddy 桌面 App，国内版与国际版可并存，各自使用自己的账号与积分。提供账号信息、令牌有效期与剩余积分查看，并带 CLI：
-
-```bash
-dsh plugin --profile web exec dsh-workbuddy-connect status
-```
-
-> 该插件的版本需与你的 DSH 内核严格对应（不同内核线用不同版本），安装前请见其 README 的版本对应表。
-
 ## 贡献者
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** —— 提出了插件页图标与中英文文案的建议（[#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)）。这条建议促成了 0.5.2：插件页有了自己的 SVG 图标，标题与简介有了中英两版，界面文案也开始跟随宿主语言。
@@ -562,8 +544,7 @@ dsh plugin --profile web exec dsh-workbuddy-connect status
 
 ## 致谢
 
-- **[corrinehu/dsh-workbuddy-connect](https://github.com/corrinehu/dsh-workbuddy-connect)** — **本插件的灵感来源**。「复用桌面 App 本机登录态、把已登录模型接进 DSH」的整体思路由该项目最早确立，本插件沿用同一做法；凭据只读复用的设计也参照于此。
-- **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 同方向的另一实现，本插件的**插件结构与 provider 注册组织方式**参考了它（其连接内核亦参照 corrinehu 的实现，见该项目致谢）。
+- **[dingminhua/dsh-connect-workbuddy](https://github.com/dingminhua/dsh-connect-workbuddy)** — 同方向的另一实现，本插件的**插件结构与 provider 注册组织方式**参考了它。
 - [dingminhua/dsh-connect-trae](https://github.com/dingminhua/dsh-connect-trae) — 同作者的 DSH 插件，可作为 DSH 插件结构的参照。
 
 > 上方「同类插件」中的项目均为独立开发者的作品，与本项目无隶属或背书关系，各自遵循其自身的许可与免责声明。
