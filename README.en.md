@@ -327,6 +327,10 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.5.10 (2026-11-10)
+
+- **Removed the `awesome-dsh-plugin-submission/` directory**: the listings are no longer maintained, the draft entry in it was merged into the official registry long ago, and the rules it described are spelled out in the upstream `contributing.md`. Keeping it only suggests it is still needed. The README's mention of it is gone as well — where the changelog mentions the directory, the text stays but the link does not, so no dead link is left behind.
+
 ### 0.5.9 (2026-11-10)
 
 - **README**: every reference to a repository that no longer exists (it now answers 404) is gone — the inspiration section, the sibling-plugin table and its section, and the acknowledgements. The practice it established and the sibling projects that followed it are still described, and every repository link left in the README was checked to be alive.
@@ -395,7 +399,7 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 ### 0.4.2 (2026-10-19)
 
 - **Discoverability**: the npm description is now bilingual, the keywords were completed (`dsh`, `credits`, `usage`, …), and the repository description and topics were updated to match.
-- Added [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/) to the repository: the market entry draft and the rules it has to follow.
+- Added `awesome-dsh-plugin-submission/` to the repository: the market entry draft and the rules it has to follow.
 - Added an English README ([README.en.md](README.en.md)).
 
 ### 0.4.1 (2026-10-19)
@@ -436,7 +440,7 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 The directory of the community plugin marketplace (`dshmarket`) is generated from the [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) registry, and this plugin's entry is in it ([#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110) listed, [#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) refreshed), so it also shows up in the DSH plugin centre.
 
-**Other directories**: entries were submitted to several awesome lists as well, but those projects see little maintenance; the entries and the forks opened for them have been cleaned up and are **no longer maintained**. Distribution runs through npm and this repository's Releases. The original draft and the submission notes are kept in the repository: [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/), in case they are ever needed again.
+**Other directories**: entries were submitted to several awesome lists as well, but those projects see little maintenance; the entries and the forks opened for them have been cleaned up and are **no longer maintained**. Distribution runs through npm and this repository's Releases.
 
 | Channel | State |
 |---|---|

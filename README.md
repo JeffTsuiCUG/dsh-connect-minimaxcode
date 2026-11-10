@@ -363,6 +363,10 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
+### 0.5.10（2026-11-10）
+
+- **删除 `awesome-dsh-plugin-submission/` 目录**：收录已停止维护，目录里的草稿条目早已合入官方注册表、提交规则在上游 `contributing.md` 里也有完整说明，留着只会让人误以为还需要它。README 中对应的说明一并去掉（历史更新记录里提到该目录的地方保留文字、只去掉链接，不留死链）。
+
 ### 0.5.9（2026-11-10）
 
 - **README**：移除指向已不存在仓库的引用（该仓库现已 404），灵感来源、同类插件与致谢三处一并清理，保留的做法与仍有效的同类项目说明不变；README 中保留的每一个仓库链接都已逐一确认存活。
@@ -433,7 +437,7 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 ### 0.4.2（2026-10-19）
 
 - **可发现性**：npm 描述改为中英双语，关键词补齐（`dsh`、`credits`、`usage` 等）；GitHub 仓库描述与 topics 同步更新。
-- 仓库内新增 [`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)：市场收录条目草稿与提交规范。
+- 仓库内新增 `awesome-dsh-plugin-submission/`：市场收录条目草稿与提交规范。
 - 新增[英文版 README](README.en.md)。
 
 ### 0.4.1（2026-10-19）
@@ -474,7 +478,7 @@ dsh plugin --profile desktop add dsh-connect-minimaxcode
 
 社区插件市场（`dshmarket`）的目录由 [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 注册表生成，本插件的条目已在该注册表中（[#8110](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8110) 收录、[#8380](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/8380) 更新），因此也会出现在 DSH 的插件中心里。
 
-**其它目录**：此前也向若干 awesome 清单提交过收录条目，但那些项目的更新活跃度很低，条目与为此开的分叉都已清理完毕，**不再维护**。插件的分发以 npm 与本仓库的 Releases 为准。仓库内保留了一份当初的草稿与提交说明：[`awesome-dsh-plugin-submission/`](awesome-dsh-plugin-submission/)，供日后需要时参考。
+**其它目录**：此前也向若干 awesome 清单提交过收录条目，但那些项目的更新活跃度很低，条目与为此开的分叉都已清理完毕，**不再维护**。插件的分发以 npm 与本仓库的 Releases 为准。
 
 | 渠道 | 状态 |
 |---|---|
