@@ -111,6 +111,14 @@ interface StatusDocument {
     updatedAt?: string
     error?: string
   }
+  generation?: {
+    imageModels: string[]
+    imageAspectRatios: string[]
+    imageAreas: string[]
+    videoDurations: number[]
+    videoResolutions: string[]
+    videoRatios: string[]
+  }
   signin?: {
     state: 'ok' | 'unavailable'
     today?: { dayNo: number; points: number; status: number; claimable: boolean; claimed: boolean }
@@ -138,6 +146,7 @@ interface StatusDocument {
   const NAMESPACE = 'dsh-connect-minimaxcode'
   const STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
   const ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
+  const GENERATE_PATH = '/plugins/dsh-connect-minimaxcode/generate'
   const POLL_INTERVAL_MS = 20_000
   /**
    * The provider id the host side registers with `llm.registerAdapter`.
@@ -195,6 +204,24 @@ interface StatusDocument {
     usageRanking: '用量排名前 {percent}%',
     usageBestDay: '最活跃的一天 {date}',
     planNoSubscription: '未订阅 M Plan（仅积分包），因此没有限额窗口',
+    generateTitle: '生成',
+    generateImage: '图片',
+    generateVideo: '视频',
+    generatePrompt: '描述你想要的画面',
+    generateAspect: '画幅',
+    generateArea: '清晰度',
+    generateDuration: '时长',
+    generateResolution: '分辨率',
+    generateRatio: '画幅',
+    generateRun: '生成',
+    generateRunning: '生成中…',
+    generateVideoRunning: '视频生成中，约需 1–2 分钟…',
+    generateImageDone: '图片已生成',
+    generateVideoDone: '视频已生成',
+    generateDownload: '下载',
+    generateSaved: '已存入 DSH 附件库',
+    generateFailed: '生成失败',
+    generateHint: '生成走 MiniMax 的开放平台，用的是你账号自己的额度。图片会并存进 DSH 的附件库。',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -244,6 +271,24 @@ interface StatusDocument {
     usageRanking: 'Top {percent}% by usage',
     usageBestDay: 'Busiest day {date}',
     planNoSubscription: 'No M Plan subscription (credits only), so there are no usage windows',
+    generateTitle: 'Generate',
+    generateImage: 'Image',
+    generateVideo: 'Video',
+    generatePrompt: 'Describe what you want',
+    generateAspect: 'Aspect',
+    generateArea: 'Area',
+    generateDuration: 'Length',
+    generateResolution: 'Resolution',
+    generateRatio: 'Aspect',
+    generateRun: 'Generate',
+    generateRunning: 'Generating…',
+    generateVideoRunning: 'Generating the video, about 1–2 minutes…',
+    generateImageDone: 'Image ready',
+    generateVideoDone: 'Video ready',
+    generateDownload: 'Download',
+    generateSaved: 'Saved to DSH attachments',
+    generateFailed: 'Generation failed',
+    generateHint: 'Generation runs on MiniMax\'s open platform with your own account\'s allowance. Images are also stored in DSH\'s attachment store.',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -654,6 +699,181 @@ interface StatusDocument {
        * The summary view is the one line the plugin list shows; the page view
        * is the full card, where the expiry detail belongs.
        */
+      /**
+       * The generation panel.
+       *
+       * A picture comes back in one answer; a video is a task that takes a
+       * minute and a half, so it is polled until the upstream says it is
+       * done. The choices come from the server rather than from this half, so
+       * they are the ones the upstream actually serves.
+       */
+      function GenerationPanel(props: SlotProps) {
+        const [status] = useStatus()
+        const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
+          const template = zh[key] ?? key
+          return template.replace(/\\{(\\w+)\\}/g, (_match, name: string) => String(params?.[name] ?? ''))
+        })
+        const options = status?.generation
+        const [mode, setMode] = React.useState<'image' | 'video'>('image')
+        const [prompt, setPrompt] = React.useState('')
+        const [model, setModel] = React.useState('')
+        const [aspect, setAspect] = React.useState('auto')
+        const [area, setArea] = React.useState('4K')
+        const [duration, setDuration] = React.useState(5)
+        const [resolution, setResolution] = React.useState('2K')
+        const [ratio, setRatio] = React.useState('16:9')
+        const [busy, setBusy] = React.useState(false)
+        const [note, setNote] = React.useState('')
+        const [picture, setPicture] = React.useState<{ dataUrl: string; size?: string; saved?: boolean } | undefined>(undefined)
+        const [video, setVideo] = React.useState<{ url: string; status?: string } | undefined>(undefined)
+
+        const imageModels = options?.imageModels ?? ['MiniMax-H3-Image']
+
+        /** Ask for a picture; the answer carries the bytes inline. */
+        async function makeImage(): Promise<void> {
+          setBusy(true)
+          setNote('')
+          setVideo(undefined)
+          try {
+            const response = await fetch(GENERATE_PATH, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                kind: 'image',
+                prompt,
+                model: model === '' ? undefined : model,
+                aspectRatio: aspect,
+                area,
+              }),
+            })
+            const body = await response.json() as {
+              ok?: boolean
+              error?: string
+              dataUrl?: string
+              size?: string
+              attachment?: { attachmentId?: string }
+            }
+            if (body.ok !== true || body.dataUrl === undefined) {
+              setNote(body.error ?? t('generateFailed'))
+              return
+            }
+            setPicture({ dataUrl: body.dataUrl, size: body.size, saved: body.attachment !== undefined })
+          } catch {
+            setNote(t('generateFailed'))
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        /** Start a video task, then wait for it the way the upstream does. */
+        async function makeVideo(): Promise<void> {
+          setBusy(true)
+          setNote('')
+          setPicture(undefined)
+          try {
+            const response = await fetch(GENERATE_PATH, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                kind: 'video',
+                prompt,
+                duration,
+                resolution,
+                ratio,
+              }),
+            })
+            const body = await response.json() as { ok?: boolean; error?: string; taskId?: string }
+            if (body.ok !== true || body.taskId === undefined) {
+              setNote(body.error ?? t('generateFailed'))
+              return
+            }
+            // The task takes a minute and a half; the upstream is asked every
+            // ten seconds, the way its own documentation recommends.
+            for (let attempt = 0; attempt < 60; attempt += 1) {
+              await new Promise(resolve => setTimeout(resolve, 10000))
+              const polled = await fetch(`${GENERATE_PATH}?taskId=${encodeURIComponent(body.taskId)}`)
+              const task = await polled.json() as { status?: string; url?: string; error?: string }
+              if (task.url !== undefined) {
+                setVideo({ url: task.url, status: task.status })
+                setNote('')
+                return
+              }
+              if (task.status !== undefined && /fail|cancel/i.test(task.status)) {
+                setNote(task.error ?? t('generateFailed'))
+                return
+              }
+            }
+            setNote(t('generateFailed'))
+          } catch {
+            setNote(t('generateFailed'))
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        const select = (value: string, onChange: (next: string) => void, values: string[]) =>
+          h('select', {
+            value,
+            style: selectStyle,
+            onChange: (event: { target: { value: string } }) => onChange(event.target.value),
+          }, ...values.map(option => h('option', { key: option, value: option }, option)))
+
+        return h('div', { style: sectionBoxStyle, 'data-minimax-generation': true },
+          h('div', { style: sectionTitleStyle }, t('generateTitle')),
+          h('div', { style: rowStyle },
+            h('button', {
+              type: 'button',
+              style: mode === 'image' ? tabActiveStyle : actionButtonStyle,
+              onClick: () => { setMode('image'); setPicture(undefined); setVideo(undefined) },
+            }, t('generateImage')),
+            h('button', {
+              type: 'button',
+              style: mode === 'video' ? tabActiveStyle : actionButtonStyle,
+              onClick: () => { setMode('video'); setPicture(undefined); setVideo(undefined) },
+            }, t('generateVideo'))),
+          h('textarea', {
+            value: prompt,
+            placeholder: t('generatePrompt'),
+            style: promptStyle,
+            rows: 3,
+            onChange: (event: { target: { value: string } }) => setPrompt(event.target.value),
+          }),
+          mode === 'image'
+            ? h('div', { style: rowStyle },
+              select(model === '' ? imageModels[0]! : model, setModel, imageModels),
+              select(aspect, setAspect, options?.imageAspectRatios ?? ['auto', '16:9', '1:1']),
+              select(area, setArea, options?.imageAreas ?? ['1K', '2K', '4K']))
+            : h('div', { style: rowStyle },
+              select(String(duration), next => setDuration(Number(next)), (options?.videoDurations ?? [5, 10]).map(String)),
+              select(resolution, setResolution, options?.videoResolutions ?? ['768P', '2K']),
+              select(ratio, setRatio, options?.videoRatios ?? ['16:9', '9:16'])),
+          h('div', { style: rowStyle },
+            h('button', {
+              type: 'button',
+              style: actionButtonStyle,
+              disabled: busy || prompt.trim() === '',
+              onClick: () => { void (mode === 'image' ? makeImage() : makeVideo()) },
+            }, busy ? (mode === 'video' ? t('generateVideoRunning') : t('generateRunning')) : t('generateRun'))),
+          note === '' ? null : h('div', { style: mutedStyle }, note),
+          picture === undefined
+            ? null
+            : h('div', { style: generationResultStyle, 'data-minimax-generation-image': true },
+              h('img', { src: picture.dataUrl, alt: prompt, style: generatedImageStyle }),
+              h('div', { style: rowStyle },
+                h('span', null, picture.size === undefined ? t('generateImageDone') : `${t('generateImageDone')} · ${picture.size}`),
+                picture.saved === true ? h('span', null, t('generateSaved')) : null,
+                h('a', { href: picture.dataUrl, download: 'minimax-h3-image.jpg', style: linkStyle }, t('generateDownload')))),
+          video === undefined
+            ? null
+            : h('div', { style: generationResultStyle, 'data-minimax-generation-video': true },
+              h('video', { src: video.url, controls: true, style: generatedVideoStyle }),
+              h('div', { style: rowStyle },
+                h('span', null, t('generateVideoDone')),
+                h('a', { href: video.url, download: 'minimax-h3-video.mp4', style: linkStyle }, t('generateDownload')))),
+          h('div', { style: mutedStyle }, t('generateHint')),
+        )
+      }
+
       function PluginPage(props: SlotProps) {
         const [status, refresh] = useStatus()
         const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
@@ -678,16 +898,23 @@ interface StatusDocument {
         }
 
         if (!available) {
-          return h('div', { style: cardStyle, 'data-minimax-credits-card': true },
-            h('div', { style: cardTitleStyle }, t('title')),
-            h('div', { style: rowStyle },
-              h('span', null, t('unavailable')),
-              h('span', null, credits_?.state === 'expired' ? t('expired') : '')),
-            loginBlock(t, login, refresh),
+          return h('div', { style: pageStyle, 'data-minimax-page': true },
+            h('div', { style: cardStyle, 'data-minimax-credits-card': true },
+              h('div', { style: cardTitleStyle }, t('title')),
+              h('div', { style: rowStyle },
+                h('span', null, t('unavailable')),
+                h('span', null, credits_?.state === 'expired' ? t('expired') : '')),
+              loginBlock(t, login, refresh),
+            ),
+            // The generation panel does not need the balance: it spends the
+            // account's generation allowance, not its credits, so it stays
+            // usable even when the balance cannot be read.
+            h(GenerationPanel, props),
           )
         }
 
-        return h('div', { style: cardStyle, 'data-minimax-credits-card': true },
+        return h('div', { style: pageStyle, 'data-minimax-page': true },
+        h('div', { style: cardStyle, 'data-minimax-credits-card': true },
           h('div', { style: cardTitleStyle }, t('title')),
           h('div', { style: bigNumberStyle }, t('balance', { total: credits(credits_!.total, 2) })),
           row(t('free'), credits(credits_!.free, 3)),
@@ -717,9 +944,10 @@ interface StatusDocument {
           credits_!.updatedAtMs !== undefined
             ? h('div', { style: mutedStyle }, t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }))
             : null,
+        ),
+        h(GenerationPanel, props),
         )
       }
-
       const wrapStyle = {
         position: 'relative' as const,
         display: 'inline-flex',
@@ -773,6 +1001,12 @@ interface StatusDocument {
         fontSize: '13px',
         lineHeight: 1.6,
       }
+      // The page stacks the balance card and the generation panel.
+      const pageStyle = {
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '10px',
+      }
       const cardTitleStyle = { fontWeight: 600 }
       const bigNumberStyle = { fontSize: '20px', fontWeight: 600, marginBottom: '2px' }
       const sectionTitleStyle = { marginTop: '8px', fontWeight: 600 }
@@ -819,6 +1053,52 @@ interface StatusDocument {
         paddingTop: '6px',
         borderTop: '1px solid var(--dsh-panel-border, currentColor)',
         opacity: 0.9,
+      }
+
+      const tabActiveStyle = {
+        appearance: 'none',
+        padding: '2px 8px',
+        borderRadius: '6px',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        background: 'var(--dsh-panel-bg, transparent)',
+        color: 'inherit',
+        font: 'inherit',
+        cursor: 'pointer',
+        fontWeight: 600,
+      }
+      const promptStyle = {
+        width: '100%',
+        boxSizing: 'border-box',
+        padding: '6px',
+        borderRadius: '6px',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        resize: 'vertical',
+      }
+      const selectStyle = {
+        padding: '2px 4px',
+        borderRadius: '6px',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+      }
+      const generationResultStyle = {
+        marginTop: '8px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+      }
+      const generatedImageStyle = {
+        maxWidth: '100%',
+        borderRadius: '8px',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+      }
+      const generatedVideoStyle = {
+        maxWidth: '100%',
+        borderRadius: '8px',
       }
 
       return {

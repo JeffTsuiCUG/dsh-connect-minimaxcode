@@ -17,6 +17,15 @@ export const MINIMAX_STATUS_PATH = '/plugins/dsh-connect-minimaxcode/status'
 /** Route the card posts to when it wants something done rather than read. */
 export const MINIMAX_ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
 
+/**
+ * Route the card posts to when it wants a picture or a video made.
+ *
+ * It is a route of its own rather than another action because generation is
+ * expensive and asynchronous: an action answers at once, while a video task
+ * takes a minute and a half and is polled.
+ */
+export const MINIMAX_GENERATE_PATH = '/plugins/dsh-connect-minimaxcode/generate'
+
 /** The daily check-in, as the card reads it. */
 export interface SigninStatus {
   /** Whether the cycle could be read. */
@@ -161,6 +170,22 @@ export interface UsageProfileStatus {
   error?: string
 }
 
+/** The choices the generation endpoints offer, as the card needs them. */
+export interface GenerationOptions {
+  /** The image models that can be asked for. */
+  imageModels: string[]
+  /** The aspect ratios an image can be made in. */
+  imageAspectRatios: string[]
+  /** The output areas an image can be made at. */
+  imageAreas: string[]
+  /** The lengths a video can be, in seconds. */
+  videoDurations: number[]
+  /** The output resolutions a video can be made at. */
+  videoResolutions: string[]
+  /** The aspect ratios a video can be made in. */
+  videoRatios: string[]
+}
+
 /** What the card renders. */
 export interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired'
@@ -189,6 +214,8 @@ export interface StatusDocument {
   login?: LoginStatus
   /** The account's usage profile, when it could be read. */
   usageProfile?: UsageProfileStatus
+  /** The choices the generation endpoints offer. */
+  generation?: GenerationOptions
 }
 
 /** Inputs the document is derived from. */
@@ -216,6 +243,8 @@ export interface StatusDeps {
   login?: LoginStatus
   /** The account's usage profile, when the account API could be reached. */
   usageProfile?: UsageProfileStatus
+  /** The choices the generation endpoints offer. */
+  generation?: GenerationOptions
 }
 
 const HINTS: Record<string, string> = {
@@ -249,6 +278,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.signin === undefined ? {} : { signin: deps.signin },
     ...deps.login === undefined ? {} : { login: deps.login },
     ...deps.usageProfile === undefined ? {} : { usageProfile: deps.usageProfile },
+    ...deps.generation === undefined ? {} : { generation: deps.generation },
   }
   if (auth.state === 'expired') {
     return {

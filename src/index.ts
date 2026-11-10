@@ -10,6 +10,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: it brings in the `attachments` Context augmentation, which is
+// what makes `ctx.get('attachments')` a typed read.
+import type {} from '@deepseek-ai/dsh-attachment'
 // Type-only: pulls in the `webServer` Context augmentation this file relies on.
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import {
@@ -24,7 +27,21 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import {
+  GenerationError,
+  IMAGE_AREAS,
+  IMAGE_ASPECT_RATIOS,
+  IMAGE_MODELS,
+  VIDEO_DURATIONS,
+  VIDEO_RATIOS,
+  VIDEO_RESOLUTIONS,
+  downloadImage,
+  fetchPlanApiKey,
+  generateImages,
+  queryVideoTask,
+  startVideoTask,
+} from './generation.ts'
 import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
 import {
   credentialNeedsRefresh,
@@ -717,6 +734,14 @@ function apply(ctx: Context) {
       signin: buildSigninStatus(),
       login: buildLoginStatus(),
       usageProfile: buildUsageProfileStatus(),
+      generation: {
+        imageModels: [...IMAGE_MODELS],
+        imageAspectRatios: [...IMAGE_ASPECT_RATIOS],
+        imageAreas: [...IMAGE_AREAS],
+        videoDurations: [...VIDEO_DURATIONS],
+        videoResolutions: [...VIDEO_RESOLUTIONS],
+        videoRatios: [...VIDEO_RATIOS],
+      },
     })
   }
 
@@ -813,6 +838,133 @@ function apply(ctx: Context) {
     }
   }
 
+  /**
+   * The plan's own API key, remembered for the session.
+   *
+   * The generation endpoints want the open platform's key rather than the
+   * desktop app's OAuth bearer, and the key belongs to the account: the
+   * credit endpoint hands it out to the OAuth credential the plugin already
+   * holds. It is fetched once and kept for as long as the plugin runs.
+   */
+  let planApiKey: string | undefined
+  const resolvePlanApiKey = async (): Promise<string> => {
+    if (planApiKey !== undefined) return planApiKey
+    const account = await resolveAccountCredential()
+    if (account.state !== 'signed-in') {
+      throw new GenerationError('尚未登录 MiniMax Code')
+    }
+    const key = await fetchPlanApiKey(account.credential, region)
+    if (key === undefined) {
+      throw new GenerationError('账户没有开放平台密钥，无法调用生成接口')
+    }
+    planApiKey = key
+    return key
+  }
+
+  /**
+   * Commit a generated picture to the host's attachment store.
+   *
+   * The store is read per request: the host may provide it after this plugin
+   * loads, and a host without one must still show the picture. The media type
+   * is narrowed to the four the store accepts, because it checks the declared
+   * type against the decoded bytes.
+   *
+   * @returns The durable reference, when the picture was stored.
+   */
+  const saveGeneratedImage = async (
+    bytes: Uint8Array,
+    mediaType: string,
+  ): Promise<Record<string, unknown> | undefined> => {
+    const store = ctx.get('attachments')
+    if (store === undefined) return undefined
+    const type = mediaType === 'image/png' || mediaType === 'image/webp' || mediaType === 'image/gif'
+      ? mediaType
+      : 'image/jpeg'
+    try {
+      const ref = await store.saveImage({ data: bytes, mediaType: type, name: 'minimax-h3-image' })
+      return { attachmentId: ref.attachmentId, width: ref.width, height: ref.height, bytes: ref.bytes }
+    } catch {
+      // A store that refuses the picture must not fail the generation: the
+      // inline copy is still shown.
+      return undefined
+    }
+  }
+
+  /**
+   * Make a picture or start a video.
+   *
+   * A picture comes back at once, as bytes: the upstream's link is good for
+   * a day, and a link that expires would leave the picture behind. A video
+   * is a task that takes a minute and a half, so this answers with the task's
+   * identifier and the card polls for the result.
+   */
+  const runGeneration = async (body: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const kind = body.kind
+    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+    if (prompt.length === 0) return { ok: false, error: '请填写提示词' }
+    const apiKey = await resolvePlanApiKey()
+    if (kind === 'video') {
+      const taskId = await startVideoTask({
+        apiKey,
+        region,
+        prompt,
+        duration: typeof body.duration === 'number' ? body.duration : undefined,
+        resolution: typeof body.resolution === 'string' ? body.resolution : undefined,
+        ratio: typeof body.ratio === 'string' ? body.ratio : undefined,
+        firstFrameUrl: typeof body.firstFrameUrl === 'string' ? body.firstFrameUrl : undefined,
+        lastFrameUrl: typeof body.lastFrameUrl === 'string' ? body.lastFrameUrl : undefined,
+      })
+      return { ok: true, kind: 'video', taskId }
+    }
+    const result = await generateImages({
+      apiKey,
+      region,
+      prompt,
+      model: typeof body.model === 'string' ? body.model : undefined,
+      aspectRatio: typeof body.aspectRatio === 'string' ? body.aspectRatio : undefined,
+      area: typeof body.area === 'string' ? body.area : undefined,
+      count: typeof body.count === 'number' ? body.count : undefined,
+    })
+    const first = result.images[0]
+    if (first === undefined) return { ok: false, error: '上游没有返回图片' }
+    if (first.bytes === undefined && first.url === undefined) {
+      return { ok: false, error: '上游没有返回图片' }
+    }
+    // The bytes come back inline, so the picture survives the upstream's
+    // link expiring a day later.
+    const image = first.bytes !== undefined
+      ? { bytes: first.bytes, mediaType: first.mediaType ?? 'image/jpeg' }
+      : await downloadImage(first.url!)
+    // The picture is also committed to the host's own attachment store, so it
+    // lives in DSH's storage rather than only in this browser tab. A host
+    // without an attachment service simply keeps the inline copy.
+    const saved = await saveGeneratedImage(image.bytes, image.mediaType)
+    return {
+      ok: true,
+      kind: 'image',
+      size: first.size,
+      revisedPrompt: first.revisedPrompt,
+      totalTokens: result.totalTokens,
+      requestId: result.requestId,
+      mediaType: image.mediaType,
+      dataUrl: `data:${image.mediaType};base64,${Buffer.from(image.bytes).toString('base64')}`,
+      ...saved === undefined ? {} : { attachment: saved },
+    }
+  }
+
+  /** Read a video task's state. */
+  const readVideoTask = async (taskId: string): Promise<Record<string, unknown>> => {
+    const apiKey = await resolvePlanApiKey()
+    const task = await queryVideoTask({ apiKey, region, taskId })
+    return {
+      ok: true,
+      kind: 'video',
+      taskId: task.taskId,
+      status: task.status,
+      url: task.url,
+    }
+  }
+
   // Mount the card's status route when the host offers a web server.
   //
   // The service is `webServer` (a WebServer with `register`), not a `webserver`
@@ -882,6 +1034,67 @@ function apply(ctx: Context) {
         } catch (error) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+        }
+      },
+    }))
+
+    // The route that makes a picture or a video.
+    //
+    // It is POST and loopback-only, like the action route, and it spends the
+    // account's own allowance — so it must not be reachable from a page that
+    // is not the host's own. GET reads a video task's state, which spends
+    // nothing; POST starts one.
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: MINIMAX_GENERATE_PATH,
+      handler: async (req, res) => {
+        if (!isLoopback(req.headers.host)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'loopback only' }))
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        try {
+          if (req.method === 'GET') {
+            const taskId = url.searchParams.get('taskId') ?? ''
+            if (taskId.length === 0) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ ok: false, error: '缺少 taskId' }))
+              return
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(await readVideoTask(taskId)))
+            return
+          }
+          if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'POST only' }))
+            return
+          }
+          let body: Record<string, unknown> = {}
+          try {
+            const text = await readRequestBody(req as unknown as AsyncIterable<Buffer>)
+            if (text.length > 0) {
+              const parsed = JSON.parse(text) as unknown
+              if (typeof parsed === 'object' && parsed !== null) {
+                body = parsed as Record<string, unknown>
+              }
+            }
+          } catch {
+            // An unreadable body simply means no prompt in it.
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(await runGeneration(body)))
+        } catch (error) {
+          // A refusal from the upstream is the caller's answer, not a
+          // failure of the plugin: the reason is what the person needs.
+          const status = error instanceof GenerationError ? 400 : 500
+          res.writeHead(status, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            ...(error instanceof GenerationError && error.code !== undefined ? { code: error.code } : {}),
+          }))
         }
       },
     }))

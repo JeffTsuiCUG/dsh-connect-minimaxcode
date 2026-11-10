@@ -1038,6 +1038,21 @@ interface UsageProfileStatus {
   /** Why the profile could not be read. */
   error?: string;
 }
+/** The choices the generation endpoints offer, as the card needs them. */
+interface GenerationOptions {
+  /** The image models that can be asked for. */
+  imageModels: string[];
+  /** The aspect ratios an image can be made in. */
+  imageAspectRatios: string[];
+  /** The output areas an image can be made at. */
+  imageAreas: string[];
+  /** The lengths a video can be, in seconds. */
+  videoDurations: number[];
+  /** The output resolutions a video can be made at. */
+  videoResolutions: string[];
+  /** The aspect ratios a video can be made in. */
+  videoRatios: string[];
+}
 /** What the card renders. */
 interface StatusDocument {
   state: 'signed-in' | 'signed-out' | 'expired';
@@ -1070,6 +1085,8 @@ interface StatusDocument {
   login?: LoginStatus;
   /** The account's usage profile, when it could be read. */
   usageProfile?: UsageProfileStatus;
+  /** The choices the generation endpoints offer. */
+  generation?: GenerationOptions;
 }
 /** Inputs the document is derived from. */
 interface StatusDeps {
@@ -1100,6 +1117,8 @@ interface StatusDeps {
   login?: LoginStatus;
   /** The account's usage profile, when the account API could be reached. */
   usageProfile?: UsageProfileStatus;
+  /** The choices the generation endpoints offer. */
+  generation?: GenerationOptions;
 }
 /**
  * Build the card's status document.

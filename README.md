@@ -338,6 +338,38 @@ Authorization: Bearer <OAuth 令牌>
 
 这一节读到的数据**不需要订阅 M Plan**：该接口属于账户域，用 OAuth 令牌即可读取，与限额窗口（属于订阅）不同。
 
+### 图像与视频生成（H3）
+
+插件页多了一个「生成」面板，可以直接用 MiniMax 的 **H3 生图**与 **H3 视频生成**：
+
+- 图片：`MiniMax-H3-Image`（另有 `MiniMax-H3-Image-Highspeed`），可选画幅与 1K / 2K / 4K 清晰度
+- 视频：`MiniMax-H3`，可选 5–15 秒、768P / 2K 与画幅
+
+两者走的都是**开放平台官方文档给出的接口**：
+
+```
+POST https://api.minimax.cn/v1/images/generations          # 文生图，同步返回
+POST https://api.minimax.cn/v2/video_generation           # 创建视频任务，异步
+GET  https://api.minimax.cn/v2/query/video_generation/{id}  # 轮询任务
+```
+
+**不需要用户配置任何密钥。** 生成接口要的是开放平台的 API 密钥（`sk-cp-…`），而这个密钥是**账户自己的**：插件用 OAuth 令牌问 `token_plan_credit`（它本来就在读这个接口拿积分），响应里的 `api_key` 就是它。实测（2026-11-10）：
+
+| 请求 | 鉴权 | 结果 |
+|---|---|---|
+| `/v1/images/generations` + `sk-cp-` 密钥 | 200，8.5 秒出图 | 1184×880 JPEG，395 KB，6401 tokens |
+| `/v1/images/generations` + OAuth 令牌 | 401 `1004 login fail` | 生成接口只认 API 密钥 |
+| `/v2/video_generation` + `sk-cp-` 密钥 | 200，任务 90 秒后 `succeeded` | 5 秒 768P 成片，162745 tokens |
+
+生成的图片会**存进 DSH 的附件库**（`ctx.attachments`），所以它留在 DSH 自己的存储里，而不只是这个浏览器标签页。
+
+#### 与桌面 App 的两处不同（实测所限，如实说明）
+
+1. **不能像普通模型那样出现在模型选择器里。** DSH 宿主的 `ctx.llm` 只有对话适配器这一个注册点（`registerAdapter`），没有图像 provider 的挂载处；模型描述符 `LlmModelInfo` 也没有「输出模态」字段，选择器无从区分图像模型。pi-ai 自己虽有图像生成 API（`ImagesProvider` / `generateImages`），但 DSH 从不构造 `ImagesModels`，插件自己 `new` 一个也没有人会读。这三点都是宿主层面的事，插件改不动。
+2. **视频在 DSH 侧目前没有承载。** `pi-ai`、`dsh-llm`、`dsh-attachment`、`dsh-llm-pi-ai` 四个包里关于 video 的声明各为零处 —— 没有视频内容块、没有附件媒体类型、没有渲染。视频因此只能生成后在面板里播放与下载，不能像图片那样进对话。
+
+图片进对话是可行的：宿主公开了 `ctx.attachments.admitPromptContent()`，插件可以独立完成「生成 → 落库 → 拿到持久引用」；但附件入口是浏览器 `File` 上传，**没有附件库**可供挑选，因此要进对话仍需作为下一轮 prompt 的一部分提交。这一步的宿主接线待下一版完成。
+
 ### 关于续期
 
 OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自己的令牌已过期时**才用 App 已存的 refresh token 续一次，并把轮换后的新令牌按客户端**原格式原子写回**同一个文件（`generation` 保持不变），因此桌面 App 的登录态不受影响。插件不会发起登录、不会登出、也不会调用任何付费/订阅类接口。
@@ -362,6 +394,14 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.6.0（2026-11-11）
+
+- **新增 H3 图像与视频生成**：插件页多了一个「生成」面板，可直接调用 MiniMax 的 `MiniMax-H3-Image`（文生图）与 `MiniMax-H3`（视频生成）。走的是开放平台官方文档给出的接口（`POST /v1/images/generations`、`POST /v2/video_generation` + 轮询 `/v2/query/video_generation/{id}`），**用户无需配置任何密钥** —— 生成接口要的是账户自己的开放平台密钥，插件用 OAuth 令牌问本来就在读的 `token_plan_credit` 就能拿到。
+- **生成的图片存入 DSH 的附件库**（`ctx.attachments`），因此它留在 DSH 自己的存储里，而不只是浏览器标签页。
+- 选项（画幅、清晰度、时长、分辨率）由服务端下发，取的是上游真正提供的那一组。
+- **实测**（2026-11-10）：图片 8.5 秒出图，1184×880 JPEG / 395 KB / 6401 tokens；视频 5 秒 768P，任务 90 秒后 `succeeded`，162745 tokens。生成接口只认 API 密钥，OAuth 令牌会被拒（`1004 login fail`）—— 这条链路的每一步都有测试钉住（新增 `tests/generation.spec.ts`，12 个用例）。
+- **如实说明与桌面 App 的差异**：H3 **不能像普通模型那样出现在模型选择器里**（宿主的 `ctx.llm` 只有对话适配器一个注册点，模型描述符也没有输出模态字段），**视频在 DSH 侧目前完全没有承载**（四个包里关于 video 的声明各为零处）。图片进对话是可行的，但附件入口只有浏览器上传、没有附件库，因此仍需作为下一轮 prompt 的一部分提交 —— 这一步的宿主接线留待下一版。
 
 ### 0.5.10（2026-11-10）
 

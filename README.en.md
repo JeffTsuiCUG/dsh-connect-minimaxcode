@@ -302,6 +302,63 @@ The card shows the parts worth acting on:
 
 This data **needs no M Plan subscription**: the endpoint is an account one, read with the OAuth bearer, unlike the limit windows, which belong to the subscription.
 
+### Image and video generation (H3)
+
+The plugin page gained a **Generate** panel, which drives MiniMax's **H3 image
+model** and **H3 video generation** directly:
+
+- Images: `MiniMax-H3-Image` (and `MiniMax-H3-Image-Highspeed`), with an
+  aspect ratio and a 1K / 2K / 4K area
+- Video: `MiniMax-H3`, with a length of 5–15 seconds, 768P / 2K and an
+  aspect ratio
+
+Both go through the endpoints the open platform's own documentation gives:
+
+```
+POST https://api.minimax.cn/v1/images/generations          # text to image, synchronous
+POST https://api.minimax.cn/v2/video_generation           # create a video task, asynchronous
+GET  https://api.minimax.cn/v2/query/video_generation/{id}  # poll the task
+```
+
+**No key has to be configured.** The generation endpoints want the open
+platform's API key (`sk-cp-…`), and that key belongs to the *account*: the
+plugin asks `token_plan_credit` with the OAuth bearer — the endpoint it
+already reads for the credit balance — and the `api_key` in the answer is
+it. Measured on 2026-11-10:
+
+| Request | Credential | Result |
+|---|---|---|
+| `/v1/images/generations` + `sk-cp-` key | 200, 8.5 s | 1184×880 JPEG, 395 KB, 6401 tokens |
+| `/v1/images/generations` + OAuth bearer | 401 `1004 login fail` | the endpoint takes only the API key |
+| `/v2/video_generation` + `sk-cp-` key | 200, task `succeeded` after 90 s | 5 s 768P clip, 162745 tokens |
+
+The generated picture is **committed to DSH's own attachment store**
+(`ctx.attachments`), so it lives in DSH's storage rather than only in this
+browser tab.
+
+#### Two differences from the desktop app, stated plainly
+
+1. **It cannot appear in the model picker like an ordinary model.** The host's
+   `ctx.llm` has exactly one registration point, `registerAdapter`, for
+   chat adapters; there is nowhere to register an image provider. The model
+   descriptor `LlmModelInfo` has no output-modality field, so the picker
+   could not tell an image model apart. pi-ai does have an image-generation
+   API (`ImagesProvider` / `generateImages`), but DSH never constructs an
+   `ImagesModels`, and one the plugin built for itself would have nothing
+   reading it. All three are host-side, and a plugin cannot change them.
+2. **Video has no carrier in DSH at all.** Across `pi-ai`, `dsh-llm`,
+   `dsh-attachment` and `dsh-llm-pi-ai` there is not one video-related
+   declaration: no video content block, no attachment media type, no
+   rendering. A video can therefore be generated, watched and downloaded in
+   the panel, but it cannot join a conversation the way a picture can.
+
+A picture *can* reach a conversation: the host publishes
+`ctx.attachments.admitPromptContent()`, so a plugin can complete "generate →
+store → durable reference" on its own. But the attachment entry point is a
+browser `File` upload and there is **no attachment library** to pick from,
+so it still has to travel as part of the next prompt. That last hop is
+planned for the next release.
+
 ### About token refresh
 
 The OAuth token is valid for about an hour and is refreshed automatically by the client. The plugin **only refreshes it once, with the refresh token the app already stored, when its own token has expired**, and writes the rotated new tokens back to the same file atomically, in the client's **original format** (with `generation` unchanged), so the desktop app's login state is unaffected. The plugin never starts a login, never signs out, and never calls any paid or subscription endpoint.
@@ -326,6 +383,14 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.6.0 (2026-11-11)
+
+- **Added H3 image and video generation**: the plugin page gained a **Generate** panel that drives MiniMax's `MiniMax-H3-Image` (text to image) and `MiniMax-H3` (video) directly. It goes through the endpoints the open platform's documentation gives (`POST /v1/images/generations`, `POST /v2/video_generation` plus polling `/v2/query/video_generation/{id}`), and **no key has to be configured**: the generation endpoints want the account's own open-platform key, and the plugin gets it by asking `token_plan_credit` with the OAuth bearer — the endpoint it already reads for the balance.
+- **Generated pictures are committed to DSH's own attachment store** (`ctx.attachments`), so they live in DSH's storage rather than only in a browser tab.
+- The choices (aspect ratio, area, length, resolution) are published by the server, and they are the ones the upstream really serves.
+- **Measured** (2026-11-10): a picture in 8.5 s, 1184×880 JPEG / 395 KB / 6401 tokens; a 5 s 768P video whose task reached `succeeded` after 90 s, 162745 tokens. The generation endpoints take only the API key and refuse the OAuth bearer (`1004 login fail`) — every step of that chain is pinned by tests (new `tests/generation.spec.ts`, 12 cases).
+- **The differences from the desktop app, stated plainly**: H3 **cannot appear in the model picker like an ordinary model** (the host's `ctx.llm` has a single chat-adapter registration point, and the model descriptor has no output-modality field), and **video has no carrier in DSH at all** (not one video-related declaration across the four packages). A picture can reach a conversation, but the attachment entry point is a browser upload with no library to pick from, so it still has to travel as part of the next prompt — that last hop is planned for the next release.
 
 ### 0.5.10 (2026-11-10)
 

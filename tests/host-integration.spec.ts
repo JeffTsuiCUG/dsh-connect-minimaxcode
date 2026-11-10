@@ -19,7 +19,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { apply, inject, name } from '../src/index.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH } from '../src/status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH } from '../src/status-route.ts'
 
 /**
  * Minimal stand-in for the host's `llm` service; only the used method is real.
@@ -136,7 +136,7 @@ describe('loading on a host with a web server', () => {
     expect(webServer.service.register).toHaveBeenCalled()
     // The plugin mounts two routes: the one the card reads and the one it
     // posts to. Each is registered exactly once.
-    expect(webServer.paths).toEqual([MINIMAX_STATUS_PATH, MINIMAX_ACTION_PATH])
+    expect(webServer.paths).toEqual([MINIMAX_STATUS_PATH, MINIMAX_ACTION_PATH, MINIMAX_GENERATE_PATH])
   })
 
   it('mounts it late too, when webServer arrives after startup', async () => {
@@ -148,7 +148,7 @@ describe('loading on a host with a web server', () => {
     expect(webServer.events).toEqual([])
     ctx.reflect.provide('webServer', webServer.service as never)
     await settle()
-    expect(webServer.paths).toEqual([MINIMAX_STATUS_PATH, MINIMAX_ACTION_PATH])
+    expect(webServer.paths).toEqual([MINIMAX_STATUS_PATH, MINIMAX_ACTION_PATH, MINIMAX_GENERATE_PATH])
   })
 
   it('releases the route when the plugin unloads', async () => {
@@ -158,11 +158,14 @@ describe('loading on a host with a web server', () => {
     ctx.reflect.provide('webServer', webServer.service as never)
     const fiber = await loadPlugin(ctx)
     await settle()
-    expect(webServer.events).toEqual(['registered', 'registered'])
+    // Three routes: the status read, the action, and the generation call.
+    expect(webServer.events).toEqual(['registered', 'registered', 'registered'])
     await fiber.dispose()
     await settle()
-    // Both routes are released with the fiber.
-    expect(webServer.events).toEqual(['registered', 'registered', 'released', 'released'])
+    // Every route is released with the fiber.
+    expect(webServer.events).toEqual([
+      'registered', 'registered', 'registered', 'released', 'released', 'released',
+    ])
   })
 
   it('re-registers the route after a reload instead of duplicating it', async () => {
@@ -177,7 +180,9 @@ describe('loading on a host with a web server', () => {
     // A reload releases the old routes and mounts them again, rather than
     // adding a second copy of either.
     expect(webServer.events).toEqual([
-      'registered', 'registered', 'released', 'released', 'registered', 'registered',
+      'registered', 'registered', 'registered',
+      'released', 'released', 'released',
+      'registered', 'registered', 'registered',
     ])
   })
 })
