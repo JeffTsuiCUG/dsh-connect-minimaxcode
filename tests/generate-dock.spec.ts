@@ -1,17 +1,15 @@
 /**
  * The image dock in the composer tool row.
  *
- * The dock generates a picture and hands it to the conversation the way the
- * composer itself hands over a message: through the session's own `prompt`.
- * That is the whole point of using the session face rather than writing to
- * the input box directly — the picture travels the same road a dragged-in
- * picture would, and the host admits it, validates it against the current
- * model and turns it into a durable attachment.
+ * The dock generates a picture and hands it to the conversation. Which door
+ * it uses depends on what the host offers, and the host hands over the
+ * session through the slot's own injection — the slot is session-scoped, so
+ * its injection receives the session it belongs to. A dock that looked for
+ * the session elsewhere would find nothing, and the picture would never
+ * arrive; these cases therefore drive the dock exactly the way the host
+ * does, through the injected props.
  *
- * These cases pin that path: the dock asks the plugin's own route for a
- * picture, turns the answer into the content shape the session admits, and
- * sends it. They also pin what happens when the host offers no session face —
- * the dock says so instead of failing silently.
+ * Nothing here reaches the network: every fetch is a stub.
  */
 
 import { readFileSync } from 'node:fs'
@@ -27,7 +25,7 @@ const PIXEL_JPEG =
   'data:image/jpeg;base64,/9j/4QTsRXhpZgAATAAAACAgIAAAEAAQMABAFBAAAABQAAAAcAAABBBAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q=='
 
 interface Slot {
-  options: { name?: string; id?: string; key?: string; order?: number; inject?: () => Record<string, unknown> }
+  options: { name?: string; id?: string; key?: string; order?: number; inject?: (sessionId?: string) => Record<string, unknown> }
   component: (props: unknown) => unknown
 }
 
@@ -35,7 +33,6 @@ interface Loaded {
   registrations: { id: string; factory(require: (id: string) => unknown): { inject: string[]; apply(ctx: unknown): void } }[]
   slots: Slot[]
   fetchCount: number
-  /** Every request the client made. */
   requests: { url: string; method: string; body?: string }[]
 }
 
@@ -77,6 +74,10 @@ function loadClient(answer: unknown = { ok: true, dataUrl: PIXEL_JPEG, mediaType
     },
     setInterval: () => 0,
     clearInterval: () => {},
+    // The browser globals the draft path needs.
+    File: globalThis.File,
+    atob: (value: string) => globalThis.atob(value),
+    Uint8Array,
   }
   sandbox.globalThis = sandbox
   sandbox.__ModuleLoader__ = {
@@ -100,13 +101,7 @@ function renderDeep(
   return first
 }
 
-/**
- * Every element in a rendered tree that carries an `onClick`.
- *
- * The dock is a button when it is closed and a row of controls when it is
- * open, so the tests look for the control they mean rather than for a
- * position in the tree.
- */
+/** Every element in a rendered tree that carries an `onClick`. */
 function clickables(node: unknown, found: { props: { onClick?: () => void } }[] = []): { props: { onClick?: () => void } }[] {
   if (Array.isArray(node)) {
     for (const child of node) clickables(child, found)
@@ -144,7 +139,7 @@ function runButton(node: unknown): { props: { onClick?: () => void } } | undefin
   })
 }
 
-/** Find the dock among the registered slots. */
+/** The dock among the registered slots. */
 function dockOf(loaded: Loaded): Slot {
   const slot = loaded.slots.find(entry => entry.options.id === 'minimax-generate')
   expect(slot, 'the image dock was not registered').toBeDefined()
@@ -161,6 +156,22 @@ function sessionFace(sent: unknown[][]) {
           return { ok: true }
         },
       },
+    }),
+  }
+}
+
+/** A conversation that only offers drafts, plus the input box's own channel. */
+function draftFace(created: { id: string }[], added: string[][]) {
+  return {
+    scope: (id: string) => ({
+      get: (key: string) => key === 'conversation'
+        ? {
+            createDrafts: (_sessionId: string, files: unknown[]) => {
+              created.push(...files.map((_, index) => ({ id: `draft-${index}` })))
+              return created
+            },
+          }
+        : undefined,
     }),
   }
 }
@@ -191,17 +202,37 @@ describe('the image dock', () => {
     expect(plugin.inject).toContain('sessions')
   })
 
+  it('takes the session from the slot injection, the way the host hands it over', () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    // The slot is session-scoped, so its injection receives the session.
+    const injected = dock.options.inject?.('session-42')
+    expect(injected).toBeDefined()
+    expect(injected?.sessionId).toBe('session-42')
+  })
+
   it('sends the generated picture to the conversation as a turn', async () => {
     const loaded = loadClient()
     const harness = reactHarness()
     const plugin = loaded.registrations[0]!.factory(() => harness.react)
     const sent: unknown[][] = []
-    let dock: ((props: unknown) => unknown) | undefined
     plugin.apply({
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
         register: (options: Slot['options'], component: (props: unknown) => unknown) => {
-          if (options.id === 'minimax-generate') dock = component
           loaded.slots.push({ options, component })
           return () => {}
         },
@@ -210,27 +241,16 @@ describe('the image dock', () => {
       sessions: sessionFace(sent),
       effect: (effect: () => unknown) => effect(),
     })
-    expect(dock).toBeDefined()
+    const dock = dockOf(loaded)
+    // The props are the ones the host's injection produced.
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
 
-    const props = { t: (key: string) => key, sessionId: 'session-1' }
-    // The collapsed dock is a single button.
-    const collapsed = JSON.stringify(renderDeep(harness, dock!, props))
+    const collapsed = JSON.stringify(renderDeep(harness, dock.component, props))
     expect(collapsed).toContain('generateToChat')
 
-    // Open it: the closed dock offers exactly one way in.
-    const closed = clickables(renderDeep(harness, dock!, props))
-    expect(closed.length, 'the dock did not offer a way to open it').toBeGreaterThan(0)
-    closed[0]!.props.onClick!()
-
-    // Type a prompt.
-    const inputs = fields(renderDeep(harness, dock!, props))
-    expect(inputs.length, 'the dock did not offer a prompt field').toBeGreaterThan(0)
-    inputs[0]!.props.onChange!({ target: { value: '一只橘猫' } })
-
-    // Send: the open dock offers the run button, beside the one that closes it.
-    const sendButton = runButton(renderDeep(harness, dock!, props))
-    expect(sendButton, 'the dock did not offer a way to send').toBeDefined()
-    sendButton!.props.onClick!()
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({ target: { value: '一只橘猫' } })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
     await new Promise(resolve => setTimeout(resolve, 20))
 
     // The plugin's own route was asked for the picture.
@@ -244,7 +264,6 @@ describe('the image dock', () => {
     expect(sent).toHaveLength(1)
     const [content, mode] = sent[0]!
     expect(mode).toBe('queue')
-    expect(Array.isArray(content)).toBe(true)
     const parts = content as { type: string; mediaType?: string; data?: string; text?: string }[]
     expect(parts[0]?.type).toBe('image')
     expect(parts[0]?.mediaType).toBe('image/jpeg')
@@ -255,16 +274,53 @@ describe('the image dock', () => {
     expect(parts[1]?.text).toBe('一只橘猫')
   })
 
-  it('says so when the host offers no session to send to', async () => {
+  it('falls back to the input box when the host offers no way to send', async () => {
     const loaded = loadClient()
     const harness = reactHarness()
     const plugin = loaded.registrations[0]!.factory(() => harness.react)
-    let dock: ((props: unknown) => unknown) | undefined
+    const created: { id: string }[] = []
+    const added: string[][] = []
     plugin.apply({
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
         register: (options: Slot['options'], component: (props: unknown) => unknown) => {
-          if (options.id === 'minimax-generate') dock = component
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      sessions: draftFace(created, added),
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    const props = {
+      ...dock.options.inject?.('session-1'),
+      t: (key: string) => key,
+      inputActions: { addAttachments: (ids: string[]) => { added.push(ids) } },
+    }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({ target: { value: '一只橘猫' } })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // The picture became a draft in the input box instead of a sent message.
+    expect(created).toHaveLength(1)
+    expect(added).toHaveLength(1)
+    expect(added[0]).toEqual(['draft-0'])
+    // The picture's arrival is the feedback: it is in the input box now.
+    const tree = JSON.stringify(harness.render(dock.component, props))
+    expect(tree).not.toContain('generateSendFailed')
+  })
+
+  it('says so when the host offers no session to send to', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
           loaded.slots.push({ options, component })
           return () => {}
         },
@@ -272,13 +328,15 @@ describe('the image dock', () => {
       locale: { register: () => {}, bind: () => (key: string) => key },
       effect: (effect: () => unknown) => effect(),
     })
-    const props = { t: (key: string) => key, sessionId: 'session-1' }
-    clickables(renderDeep(harness, dock!, props))[0]!.props.onClick!()
-    fields(renderDeep(harness, dock!, props))[0]!.props.onChange!({ target: { value: '一只橘猫' } })
-    runButton(renderDeep(harness, dock!, props))!.props.onClick!()
+    const dock = dockOf(loaded)
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({ target: { value: '一只橘猫' } })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const tree = JSON.stringify(harness.render(dock!, props))
+    const tree = JSON.stringify(harness.render(dock.component, props))
     expect(tree).toContain('generateSendFailed')
   })
 })

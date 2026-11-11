@@ -384,6 +384,13 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.2 (2026-11-11)
+
+- **Fixed "could not send it to the conversation"**: the previous version looked for the session among the slot's props, but the host hands the session to the slot's **injection callback** (the slot is session-scoped), so the identifier was always missing and the picture had nowhere to go. The session is now taken the way the host gives it.
+- **One more way to deliver**: when the host offers no session face to send with, the plugin falls back to the input box's own attachment channel — the very road a picture dragged in by hand takes, so it appears in the input box and you press send.
+- The picture's arrival is the feedback, so nothing is left on screen and the composer stays clean.
+- `tests/generate-dock.spec.ts` rewritten to drive the plugin **the way the host does** (6 cases): the session identifier arrives through the injection, the picture travels as `{type:"image", mediaType, data}` with the prompt, the fallback into the input box when there is no way to send, and the message shown when neither is there.
+
 ### 0.6.1 (2026-11-11)
 
 - **A generated picture can now go straight into the conversation**: the composer tool row gained a **Generate an image** entry. Write a prompt, press generate, and the picture is sent as part of this turn — through the host's own road (`ctx.sessions.binding(id).session.prompt(content, mode, signal, requestId)`, the very call the send button makes), so the host validates it, commits it as a durable attachment and treats it as an ordinary message.
