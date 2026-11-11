@@ -337,6 +337,71 @@ describe('the image dock', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
 
     const tree = JSON.stringify(harness.render(dock.component, props))
-    expect(tree).toContain('generateSendFailed')
+    // The message now names the missing piece rather than one blanket failure.
+    expect(tree).toContain('generateNoSessions')
+  })
+
+  it('reports what the host offers it, so a failure names the missing piece', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      // A host that offers the sessions service but no session for this one.
+      sessions: { binding: () => undefined, scope: () => undefined },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
+
+    harness.render(dock.component, props)
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // The report went to the plugin's own route, so it can be read from the
+    // status document rather than only from the screen that hit the problem.
+    const report = loaded.requests.find(entry => entry.url.includes('/capability'))
+    expect(report, 'the dock never reported what the host offers').toBeDefined()
+    const findings = JSON.parse(decodeURIComponent(report!.url.split('report=')[1] ?? '{}')) as Record<string, string>
+    expect(findings.sessionId).toBe('present')
+    expect(findings.sessionsService).toBe('present')
+    // This host has no binding and no scope for the session.
+    expect(findings.binding).toBe('missing')
+    expect(findings.scope).toBe('missing')
+    expect(findings.inputActions).toBe('missing')
+  })
+
+  it('names the missing piece when the host gives no session at all', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    // A host that names no session at all.
+    const props = { t: (key: string) => key }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({ target: { value: '一只橘猫' } })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    const tree = JSON.stringify(harness.render(dock.component, props))
+    expect(tree).toContain('generateNoSession')
   })
 })

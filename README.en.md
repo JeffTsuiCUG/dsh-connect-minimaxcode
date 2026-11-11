@@ -384,6 +384,13 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.3 (2026-11-11)
+
+- **"Could not send it to the conversation" now names the missing piece**: delivering a picture needs several pieces of the host — the session identifier, the sessions service, the session binding, a way to send or to hold a draft, and the input box's attachment channel — and they arrive in different ways. There used to be one blanket failure message; each absence now has its own: the host named no session / offers no sessions service / this session is not reachable / it cannot send / it cannot hold drafts / the input box takes no attachments.
+- **The plugin checks itself and reports**: the card tells the plugin's own route what the host actually offered when it mounts, so the status document carries that report — working on a failure no longer depends only on the sentence on the screen.
+- Also fixed a real defect the tests caught at once: the report referred to the session identifier before it was defined, and the host fires effects early, so the script broke.
+- `tests/generate-dock.spec.ts` grows to 8 cases, covering the report's content and the wording when no session is named.
+
 ### 0.6.2 (2026-11-11)
 
 - **Fixed "could not send it to the conversation"**: the previous version looked for the session among the slot's props, but the host hands the session to the slot's **injection callback** (the slot is session-scoped), so the identifier was always missing and the picture had nowhere to go. The session is now taken the way the host gives it.
