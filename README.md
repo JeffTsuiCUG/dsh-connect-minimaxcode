@@ -368,7 +368,7 @@ GET  https://api.minimax.cn/v2/query/video_generation/{id}  # 轮询任务
 1. **不能像普通模型那样出现在模型选择器里。** DSH 宿主的 `ctx.llm` 只有对话适配器这一个注册点（`registerAdapter`），没有图像 provider 的挂载处；模型描述符 `LlmModelInfo` 也没有「输出模态」字段，选择器无从区分图像模型。pi-ai 自己虽有图像生成 API（`ImagesProvider` / `generateImages`），但 DSH 从不构造 `ImagesModels`，插件自己 `new` 一个也没有人会读。这三点都是宿主层面的事，插件改不动。
 2. **视频在 DSH 侧目前没有承载。** `pi-ai`、`dsh-llm`、`dsh-attachment`、`dsh-llm-pi-ai` 四个包里关于 video 的声明各为零处 —— 没有视频内容块、没有附件媒体类型、没有渲染。视频因此只能生成后在面板里播放与下载，不能像图片那样进对话。
 
-图片进对话是可行的：宿主公开了 `ctx.attachments.admitPromptContent()`，插件可以独立完成「生成 → 落库 → 拿到持久引用」；但附件入口是浏览器 `File` 上传，**没有附件库**可供挑选，因此要进对话仍需作为下一轮 prompt 的一部分提交。这一步的宿主接线待下一版完成。
+图片进对话是可行的：宿主公开了 `ctx.attachments.admitPromptContent()`，插件可以独立完成「生成 → 落库 → 拿到持久引用」；但附件入口是浏览器 `File` 上传，**没有附件库**可供挑选，因此要进对话仍需作为下一轮 prompt 的一部分提交。这一步已由 0.6.1 完成（见下）。
 
 ### 关于续期
 
@@ -394,6 +394,12 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 - **设备码流需要能访问 `account.minimax.cn`**，且授权时要在浏览器里能登录 MiniMax 账号。某些内网或受限网络下打不开授权页。
 
 ## 更新记录
+
+### 0.6.1（2026-11-11）
+
+- **生成的图片现在能直接进对话**：输入框工具行新增一个「生成图片」入口，写下提示词点生成，图片会作为**这一轮消息的一部分**发给模型 —— 走的是宿主自己那条路（`ctx.sessions.binding(id).session.prompt(content, mode, signal, requestId)`，与输入框按发送键完全相同），因此图片会被宿主校验、落成持久附件，并按普通消息参与对话。
+- 宿主若不暴露会话句柄，该入口会明确提示「无法发送到对话」，而不是静默失败；插件页的生成面板仍可照常使用。
+- 新增 `tests/generate-dock.spec.ts`（4 个用例）钉住：入口注册在工具行、声明了 `sessions` 服务、生成的图以 `{type:"image", mediaType, data}` 的形态（原始 base64，不带 data-url 前缀）随提示词一起发出、以及没有会话句柄时的提示。全量 252 个用例通过。
 
 ### 0.6.0（2026-11-11）
 

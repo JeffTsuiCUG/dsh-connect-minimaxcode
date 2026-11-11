@@ -357,7 +357,7 @@ A picture *can* reach a conversation: the host publishes
 store → durable reference" on its own. But the attachment entry point is a
 browser `File` upload and there is **no attachment library** to pick from,
 so it still has to travel as part of the next prompt. That last hop is
-planned for the next release.
+done in 0.6.1 (see below).
 
 ### About token refresh
 
@@ -383,6 +383,12 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.6.1 (2026-11-11)
+
+- **A generated picture can now go straight into the conversation**: the composer tool row gained a **Generate an image** entry. Write a prompt, press generate, and the picture is sent as part of this turn — through the host's own road (`ctx.sessions.binding(id).session.prompt(content, mode, signal, requestId)`, the very call the send button makes), so the host validates it, commits it as a durable attachment and treats it as an ordinary message.
+- A host that exposes no session face gets a plain "could not send it to the conversation" instead of a silent failure, and the plugin page's panel keeps working regardless.
+- Added `tests/generate-dock.spec.ts` (4 cases) pinning: the entry is registered in the tool row, it declares the `sessions` service, the picture travels as `{type:"image", mediaType, data}` (raw base64, no data-url prefix) together with the prompt, and the message shown when there is no session to send to. All 252 cases pass.
 
 ### 0.6.0 (2026-11-11)
 

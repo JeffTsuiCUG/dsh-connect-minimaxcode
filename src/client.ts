@@ -31,12 +31,39 @@ interface SlotProps {
   t?: (key: string, params?: Record<string, unknown>) => string
   view?: 'summary' | 'page'
   /**
+   * The session the composer belongs to.
+   *
+   * The tool row is session-scoped, so it knows which conversation a picture
+   * should go into; the plugin page is root-scoped and has no session at all.
+   */
+  sessionId?: string
+  /**
    * The host's projection reader, handed to tool-row entries.
    *
    * Absent on hosts that do not offer it; the pill is then kept rather than
    * hidden, so an older host still shows its balance.
    */
   useProjection?: (name: string) => ModelSelection | undefined
+}
+
+/**
+ * The shape this half needs from the host's sessions service.
+ *
+ * `binding(id).session.prompt(content, mode, signal, requestId)` is how the
+ * composer itself sends a message, so using it puts a generated picture into
+ * the conversation by exactly the road a dragged-in picture would take.
+ */
+interface SessionsContext {
+  binding?: (id: string) => {
+    session?: {
+      prompt?: (
+        content: unknown[],
+        mode: string,
+        signal?: AbortSignal,
+        requestId?: string,
+      ) => Promise<unknown>
+    }
+  } | undefined
 }
 
 /** The shape this half needs from the host's slot registry. */
@@ -62,6 +89,8 @@ interface SlotContext {
     register(namespace: string, messages: { zh: Record<string, string>; en: Record<string, string> }): unknown
     bind(namespace: string): (key: string, params?: Record<string, unknown>) => string
   }
+  /** The host's sessions service, when it offers one. */
+  sessions?: SessionsContext
   effect(effect: () => unknown, label?: string): unknown
 }
 
@@ -222,6 +251,10 @@ interface StatusDocument {
     generateSaved: '已存入 DSH 附件库',
     generateFailed: '生成失败',
     generateHint: '生成走 MiniMax 的开放平台，用的是你账号自己的额度。图片会并存进 DSH 的附件库。',
+    generateToChat: '生成图片',
+    generateToChatHint: '生成的图片会作为这一轮消息的一部分发给模型。',
+    generateSent: '图片已发送到对话',
+    generateSendFailed: '无法发送到对话，请到插件页生成后下载。',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code credits',
@@ -289,6 +322,10 @@ interface StatusDocument {
     generateSaved: 'Saved to DSH attachments',
     generateFailed: 'Generation failed',
     generateHint: 'Generation runs on MiniMax\'s open platform with your own account\'s allowance. Images are also stored in DSH\'s attachment store.',
+    generateToChat: 'Generate an image',
+    generateToChatHint: 'The generated picture is sent as part of this turn.',
+    generateSent: 'The picture is on its way to the conversation',
+    generateSendFailed: 'Could not send it to the conversation; generate on the plugin page and download it instead.',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -303,6 +340,14 @@ interface StatusDocument {
         useState: <T>(initial: T) => [T, (next: T) => void]
       }
       const h = React.createElement
+
+      /**
+       * The host's client context, once the plugin is applied.
+       *
+       * The components are closures over the module, not over the context, so
+       * this is how they reach the host's services.
+       */
+      let clientContext: SlotContext | undefined
 
       /** Format a credit amount without pretending to more precision. */
       function credits(value: number | undefined, digits: number): string {
@@ -576,6 +621,132 @@ interface StatusDocument {
         const provider = (projection?.next ?? projection?.lastUsed)?.provider
         if (provider !== undefined && provider !== MINIMAX_PROVIDER_ID) return null
         return h(CreditPill, props)
+      }
+
+      /**
+       * Generate a picture and send it to the conversation.
+       *
+       * The composer already knows how to send a message with an image in it,
+       * and the picture the upstream produces is an ordinary image file, so
+       * the dock does the same thing the composer does: it asks the session
+       * to accept a turn whose content is the picture plus the prompt.
+       *
+       * Nothing here is required of the host beyond what the composer itself
+       * uses. A host that does not expose the session face simply gets the
+       * message that says so, and the plugin page still offers the picture.
+       */
+      function GenerateDock(props: SlotProps) {
+        const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
+          const template = zh[key] ?? key
+          return template.replace(/\\{(\\w+)\\}/g, (_match, name: string) => String(params?.[name] ?? ''))
+        })
+        const [open, setOpen] = React.useState(false)
+        const [prompt, setPrompt] = React.useState('')
+        const [busy, setBusy] = React.useState(false)
+        const [note, setNote] = React.useState('')
+
+        /**
+         * The session's own send path.
+         *
+         * `binding(id).session.prompt(content, mode, signal, requestId)` is
+         * what the composer calls when the person presses send, so a picture
+         * sent this way is a normal turn.
+         */
+        const sessionFace = (): {
+          prompt: (
+            content: unknown[],
+            mode: string,
+            signal?: AbortSignal,
+            requestId?: string,
+          ) => Promise<unknown>
+        } | undefined => {
+          const sessionId = props.sessionId
+          if (sessionId === undefined) return undefined
+          const binding = clientContext?.sessions?.binding?.(sessionId)
+          const send = binding?.session?.prompt
+          return typeof send === 'function' ? { prompt: send } : undefined
+        }
+
+        /** Turn a data URL into the parts the session's admission accepts. */
+        const imagePart = (dataUrl: string, mediaType: string): { type: string; mediaType: string; data: string } | undefined => {
+          const comma = dataUrl.indexOf(',')
+          if (comma < 0) return undefined
+          return { type: 'image', mediaType, data: dataUrl.slice(comma + 1) }
+        }
+
+        async function send(): Promise<void> {
+          const text = prompt.trim()
+          if (text === '') return
+          setBusy(true)
+          setNote('')
+          try {
+            const response = await fetch(GENERATE_PATH, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ kind: 'image', prompt: text, area: '1K' }),
+            })
+            const body = await response.json() as {
+              ok?: boolean
+              error?: string
+              dataUrl?: string
+              mediaType?: string
+            }
+            if (body.ok !== true || body.dataUrl === undefined) {
+              setNote(body.error ?? t('generateFailed'))
+              return
+            }
+            const part = imagePart(body.dataUrl, body.mediaType ?? 'image/jpeg')
+            const face = sessionFace()
+            if (part === undefined || face === undefined) {
+              setNote(t('generateSendFailed'))
+              return
+            }
+            await face.prompt(
+              [part, { type: 'text', text }],
+              'queue',
+              undefined,
+              `minimax-h3-${Date.now()}`,
+            )
+            setPrompt('')
+            setOpen(false)
+            setNote(t('generateSent'))
+          } catch {
+            setNote(t('generateSendFailed'))
+          } finally {
+            setBusy(false)
+          }
+        }
+
+        if (!open) {
+          return h('button', {
+            type: 'button',
+            style: buttonStyle,
+            title: t('generateToChatHint'),
+            onClick: () => { setOpen(true); setNote('') },
+          }, t('generateToChat'))
+        }
+        return h('div', { style: dockStyle, 'data-minimax-generate-dock': true },
+          h('input', {
+            value: prompt,
+            placeholder: t('generatePrompt'),
+            style: dockInputStyle,
+            disabled: busy,
+            onChange: (event: { target: { value: string } }) => setPrompt(event.target.value),
+          }),
+          h('button', {
+            type: 'button',
+            style: buttonStyle,
+            disabled: busy || prompt.trim() === '',
+            onClick: () => { void send() },
+          }, busy ? t('generateRunning') : t('generateRun')),
+          h('button', {
+            type: 'button',
+            style: buttonStyle,
+            disabled: busy,
+            onClick: () => { setOpen(false); setPrompt(''); setNote('') },
+          }, '✕'),
+          note === '' ? null : h('span', { style: mutedStyle }, note),
+        )
       }
 
       /** Ask the host to do something, and let the card read the result. */
@@ -966,6 +1137,21 @@ interface StatusDocument {
         opacity: 0.8,
         padding: '1px 8px',
       }
+      const dockStyle = {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+      }
+      const dockInputStyle = {
+        width: '160px',
+        padding: '2px 6px',
+        borderRadius: '999px',
+        border: '1px solid var(--dsh-composer-dock-inset, currentColor)',
+        background: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        fontSize: '12px',
+      }
       const detailStyle = {
         position: 'absolute' as const,
         bottom: 'calc(100% + 6px)',
@@ -1102,9 +1288,15 @@ interface StatusDocument {
       }
 
       return {
-        inject: ['slots', 'locale'],
+        // The sessions service is what lets a generated picture be delivered
+        // into the conversation the composer belongs to.
+        inject: ['slots', 'locale', 'sessions'],
         apply(ctx: unknown) {
           const context = ctx as SlotContext
+          // The components need the host's sessions service to deliver a
+          // generated picture into the conversation, so it is kept where the
+          // components can reach it.
+          clientContext = context
           // Visible text goes through the host's locale service.
           context.effect(() => context.locale.register(NAMESPACE, { zh, en }), `${BUNDLE_NAME}: locale`)
           // The composer and plugin-page slots carry no translator in their
@@ -1124,6 +1316,15 @@ interface StatusDocument {
             locale: NAMESPACE,
             inject: () => ({ t }),
           }, CreditPillGate))
+          // The image dock sits beside the balance: it is the same provider's
+          // capability, and it needs the session the composer belongs to.
+          context.slots.inject('conversation.input.left', () => context.slots.register({
+            name: 'conversation.input.left',
+            id: 'minimax-generate',
+            order: 5,
+            locale: NAMESPACE,
+            inject: () => ({ t }),
+          }, GenerateDock))
           // The plugin's own page, keyed by the package name, where the
           // balance and the expiry schedule are spelled out.
           context.slots.inject('plugins.bundle.config', () => context.slots.register({

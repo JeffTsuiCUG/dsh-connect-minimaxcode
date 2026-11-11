@@ -177,18 +177,25 @@ describe('client bundle', () => {
     })
     // The tool row, not the ambient strip below the composer: the balance
     // belongs beside the model picker that decides whose balance it is.
-    expect(loaded.slotNames).toEqual(['conversation.input.left', 'plugins.bundle.config'])
-    expect(loaded.slots).toHaveLength(2)
+    expect(loaded.slotNames).toEqual([
+      'conversation.input.left', 'conversation.input.left', 'plugins.bundle.config',
+    ])
+    expect(loaded.slots).toHaveLength(3)
+    // The balance readout and the image dock sit side by side in the tool row:
+    // both belong to the provider the picker has selected.
     expect(loaded.slots[0]?.options.name).toBe('conversation.input.left')
     expect(loaded.slots[0]?.options.id).toBe('minimax-credits')
     expect(loaded.slots[0]?.options.order).toBe(4)
+    expect(loaded.slots[1]?.options.name).toBe('conversation.input.left')
+    expect(loaded.slots[1]?.options.id).toBe('minimax-generate')
+    expect(loaded.slots[1]?.options.order).toBe(5)
     // The page card is keyed by the package name, which is how the plugins
     // page finds the entry that belongs to this bundle.
-    expect(loaded.slots[1]?.options.name).toBe('plugins.bundle.config')
-    expect(loaded.slots[1]?.options.key).toBe('dsh-connect-minimaxcode')
+    expect(loaded.slots[2]?.options.name).toBe('plugins.bundle.config')
+    expect(loaded.slots[2]?.options.key).toBe('dsh-connect-minimaxcode')
   })
 
-  it('injects the bound locale into both slots', () => {
+  it('injects the bound locale into every slot', () => {
     const loaded = loadClient()
     const harness = reactHarness()
     const plugin = loaded.registrations[0]!.factory(() => harness.react)
@@ -213,7 +220,7 @@ describe('client bundle', () => {
     })
     // The composer and plugin-page slots carry no translator of their own,
     // so the bound one has to be injected into both.
-    expect(loaded.slots).toHaveLength(2)
+    expect(loaded.slots).toHaveLength(3)
     for (const slot of loaded.slots) {
       expect(typeof slot.options.inject).toBe('function')
       const props = slot.options.inject!()
@@ -240,7 +247,7 @@ describe('client bundle', () => {
       },
       effect: (effect: () => unknown) => effect(),
     })
-    const slot = loaded.slots.find(entry => entry.options.name === 'conversation.input.left')!
+    const slot = loaded.slots.find(entry => entry.options.id === 'minimax-credits')!
     const tree = JSON.stringify(renderDeep(harness, slot.component, { ...slot.options.inject!() }))
     // The host's translator wins; the Chinese fallback stays out of it.
     expect(tree).toContain('T:unavailable')
@@ -283,9 +290,9 @@ describe('client bundle', () => {
     plugin.apply({
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
-        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
-          // The tool-row readout, not the page card registered after it.
-          if (options?.name === 'conversation.input.left') component = rendered
+        register: (options: { name?: string; id?: string }, rendered: (props: unknown) => unknown) => {
+          // The tool-row readout, not the image dock or the page card.
+          if (options?.id === 'minimax-credits') component = rendered
           return () => {}
         },
       },
@@ -318,8 +325,8 @@ describe('client bundle', () => {
     plugin.apply({
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
-        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
-          if (options?.name === 'conversation.input.left') component = rendered
+        register: (options: { name?: string; id?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.id === 'minimax-credits') component = rendered
           return () => {}
         },
       },
@@ -400,8 +407,8 @@ describe('client bundle', () => {
       slots: {
         inject: (_name: string, register: () => unknown) => register(),
         // Two slots register; the readout is the one in the tool row.
-        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
-          if (options?.name === 'conversation.input.left') component = rendered
+        register: (options: { name?: string; id?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.id === 'minimax-credits') component = rendered
           return () => {}
         },
       },
