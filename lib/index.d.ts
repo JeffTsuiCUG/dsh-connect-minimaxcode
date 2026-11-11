@@ -1087,6 +1087,13 @@ interface StatusDocument {
   usageProfile?: UsageProfileStatus;
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
+  /** What the host offered the card the last time it looked. */
+  capability?: {
+    /** When the card reported it. */
+    at: number;
+    /** One entry per piece the card looked for. */
+    findings: Record<string, string>;
+  };
 }
 /** Inputs the document is derived from. */
 interface StatusDeps {
@@ -1119,6 +1126,13 @@ interface StatusDeps {
   usageProfile?: UsageProfileStatus;
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
+  /** What the host offered the card the last time it looked. */
+  capability?: {
+    /** When the card reported it. */
+    at: number;
+    /** One entry per piece the card looked for. */
+    findings: Record<string, string>;
+  };
 }
 /**
  * Build the card's status document.

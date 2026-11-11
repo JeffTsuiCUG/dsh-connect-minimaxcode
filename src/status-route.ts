@@ -26,6 +26,17 @@ export const MINIMAX_ACTION_PATH = '/plugins/dsh-connect-minimaxcode/action'
  */
 export const MINIMAX_GENERATE_PATH = '/plugins/dsh-connect-minimaxcode/generate'
 
+/**
+ * Route the card reports what the host offers it on.
+ *
+ * Delivering a generated picture into a conversation needs several pieces of
+ * the host — the session, its face, the input box's attachment channel — and
+ * they are handed over in different ways. Reporting what is actually there
+ * turns "it did not work" into "this piece is missing", which is the only
+ * useful answer when something like that goes wrong.
+ */
+export const MINIMAX_CAPABILITY_PATH = '/plugins/dsh-connect-minimaxcode/capability'
+
 /** The daily check-in, as the card reads it. */
 export interface SigninStatus {
   /** Whether the cycle could be read. */
@@ -216,6 +227,13 @@ export interface StatusDocument {
   usageProfile?: UsageProfileStatus
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
+  /** What the host offered the card the last time it looked. */
+  capability?: {
+    /** When the card reported it. */
+    at: number
+    /** One entry per piece the card looked for. */
+    findings: Record<string, string>
+  }
 }
 
 /** Inputs the document is derived from. */
@@ -245,6 +263,13 @@ export interface StatusDeps {
   usageProfile?: UsageProfileStatus
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
+  /** What the host offered the card the last time it looked. */
+  capability?: {
+    /** When the card reported it. */
+    at: number
+    /** One entry per piece the card looked for. */
+    findings: Record<string, string>
+  }
 }
 
 const HINTS: Record<string, string> = {
@@ -278,6 +303,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.signin === undefined ? {} : { signin: deps.signin },
     ...deps.login === undefined ? {} : { login: deps.login },
     ...deps.usageProfile === undefined ? {} : { usageProfile: deps.usageProfile },
+    ...deps.capability === undefined ? {} : { capability: deps.capability },
     ...deps.generation === undefined ? {} : { generation: deps.generation },
   }
   if (auth.state === 'expired') {

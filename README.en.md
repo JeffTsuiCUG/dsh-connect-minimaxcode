@@ -384,6 +384,12 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.4 (2026-11-11)
+
+- **Fixed "the self-check report never appeared"**: the previous version put the self-check in the client half (the card reports what the host offered), but **the server half was never landed** — the status document had no field to carry the report and no route to receive it, so the card reported into nowhere. It is complete now: the report is received by the plugin's own route and appears in the status document as `capability`.
+- The episode also exposed a process problem: a few anchors in the patch script missed, and its output was covered by another script in the same command, so a partial application was read as a complete one. **Every patch is now checked individually**, and an end-to-end check was added: the report counts as working only once it has travelled from the card through the route and back into the status document.
+- The route-count cases were brought up to date (the host now mounts four routes: status, action, capability, generation).
+
 ### 0.6.3 (2026-11-11)
 
 - **"Could not send it to the conversation" now names the missing piece**: delivering a picture needs several pieces of the host — the session identifier, the sessions service, the session binding, a way to send or to hold a draft, and the input box's attachment channel — and they arrive in different ways. There used to be one blanket failure message; each absence now has its own: the host named no session / offers no sessions service / this session is not reachable / it cannot send / it cannot hold drafts / the input box takes no attachments.

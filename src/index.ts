@@ -27,7 +27,7 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import {
   GenerationError,
   IMAGE_AREAS,
@@ -242,6 +242,8 @@ function apply(ctx: Context) {
   let loginPending = false
   /** Whether the server refused the plugin's own credential. */
   let revokedByServer = false
+  /** What the card last reported about what the host offered it. */
+  let capability: { at: number; findings: Record<string, string> } | undefined
 
   /**
    * Give up on the plugin's own credential after the server refused it.
@@ -734,6 +736,7 @@ function apply(ctx: Context) {
       signin: buildSigninStatus(),
       login: buildLoginStatus(),
       usageProfile: buildUsageProfileStatus(),
+      capability,
       generation: {
         imageModels: [...IMAGE_MODELS],
         imageAspectRatios: [...IMAGE_ASPECT_RATIOS],
@@ -1031,6 +1034,46 @@ function apply(ctx: Context) {
           const result = await runAction(action, body)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
+        }
+      },
+    }))
+
+    // The route the card reports what the host offers it on.
+    //
+    // It is a GET and loopback-only, and it records rather than acts: the
+    // answer tells the card — and whoever reads the status document next —
+    // which piece of the host is missing when a picture cannot be delivered.
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: MINIMAX_CAPABILITY_PATH,
+      handler: async (req, res) => {
+        if (!isLoopback(req.headers.host)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'loopback only' }))
+          return
+        }
+        try {
+          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+          const raw = url.searchParams.get('report') ?? ''
+          let findings: Record<string, string> = {}
+          try {
+            const parsed = JSON.parse(raw) as unknown
+            if (typeof parsed === 'object' && parsed !== null) {
+              for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+                findings[key] = String(value)
+              }
+            }
+          } catch {
+            // An unreadable report is still worth recording: it says the card
+            // looked, and could not describe what it saw.
+            findings = { report: 'unreadable' }
+          }
+          capability = { at: Date.now(), findings }
+          res.writeHead(204)
+          res.end()
         } catch (error) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }))
