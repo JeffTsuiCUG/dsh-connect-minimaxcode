@@ -384,11 +384,37 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
-### 0.6.8 (2026-11-12)
+### 0.6.8 (2026-11-13)
+
 
 - **The plan tier moved into the Plan box**: the tier and the day it ends used to be a row of their own below the two boxes, stretched into a band of empty space. The tier is now the Plan box's headline line, wearing **the balance's own big-number size and height** (20px), and the day it ends stays the small text it was, on the right and on the tier's baseline; the box itself is named "Plan" rather than "Plan allowance".
 - **The grid has no hole any more**: the tier row no longer occupies a grid cell, so the check-in and the expiring grants now sit side by side in the second row and both columns are filled — the empty band under the left column and the hole at the bottom right are gone together. The Plan box did not grow by a row either: the tier line takes the place of the invisible number that used to hold the row height open.
 - The tier is still **the value the upstream sends** (`token_plan_tier`), not a fixed label: another plan shows its own name, and only an answer without that field falls back to "M Plan subscription".
+
+
+- **Fixed "Could not send it to the conversation": the session method was never bound.** Before this release the composer's **Generate an image** entry failed *every* time, reporting "Could not send it to the conversation; generate on the plugin page and download it instead." The plugin took `session.prompt` off the session object and then called it as a standalone function:
+
+  ```ts
+  const send = binding?.session?.prompt
+  return typeof send === 'function' ? { prompt: send } : undefined
+  ```
+
+  The host's own `Session.prompt` reaches the gateway **through `this.remote`**:
+
+  ```ts
+  result = await this.remote.session.prompt({ ... })
+  ```
+
+  Once the method is taken off the object, `this` no longer points at the session but at the `{ prompt: send }` wrapper, so `this.remote` is `undefined` and the call throws `undefined is not an object (evaluating 'this.remote.session')`. The method is now bound back to its session (`beginSubmission` for the same reason), and the picture actually goes out.
+
+  Worth noting: the draft channel in the same file has always written `create.bind(conversation)` — only the send path missed it. And because the send path is tried first, the draft path never runs, so that correct binding could not rescue it.
+
+- **A sent picture now shows up in the conversation.** The plugin used to invent its own `requestId` (`minimax-h3-${Date.now()}`) and hand it to `prompt()`: the model received the picture, but the **conversation showed no such message** — the host wants a local submission echo registered with `beginSubmission()` first, and the prompt to carry the identity that registration mints. The dock now does what the host's own composer does, and the picture arrives as part of that turn.
+
+- **A refusal is no longer read as a success.** A refused prompt resolves with `{ ok: false }` rather than throwing, and the plugin used to treat that as success and clear the note, leaving nothing on screen. The outcome is now read, and a refusal says so.
+
+- **Three new regression cases.** The mock in `tests/generate-dock.spec.ts` used to be an **arrow function that never reads `this`**, so whether the method was bound could not be observed — while the real host reads `this.remote`, and that is exactly the difference. The new cases make the mock read `this.remote` the way the host does, and pin three things: the call keeps the session as its receiver, the prompt carries the identity `beginSubmission` minted, and a refusal is reported. **Revert the fix and they fail at once.**
+
 
 ### 0.6.7 (2026-11-12)
 
@@ -649,6 +675,8 @@ Fixing it yourself is even better — just open the PR. The format does not matt
 - **[azsora](https://github.com/azsora)** — found the plan's rate-limit endpoint in the desktop app's own traffic and wired the 5-hour and weekly usage windows into the credit pill and the plugin page ([#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)): the window length is derived from the response's own edges rather than hard-coded. It became 0.5.5.
 - **[qzz19970504](https://github.com/qzz19970504)** — found and fixed the wiring gap that made every image upload fail ([#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)): the catalog declared the `image` modality, but the adapter never connected the host's durable attachment service, so pi-ai refused image requests before they were sent. The fix became 0.5.3.
 - **[azsora](https://github.com/azsora)** — found that the official quota endpoint renamed its window field and inverted its meaning (the share used became the share remaining), closed the gap where a 200 with an unreadable shape never reached the older path, and reworked the pill detail and the page card into rounded sub-cards that say why there are no windows ([#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)). It became 0.6.7.
+- **[lulunick](https://github.com/lulunick)** — found the real reason the "Generate an image" entry failed **every** time: the plugin took `session.prompt` off the session object and called it as a standalone function, so `this` pointed at the wrapper instead of at the session — and the host's own `Session.prompt` reaches the gateway through `this.remote`, which made the call throw `undefined is not an object`. With the methods bound back to their session the picture actually goes out; he also added the local submission echo the host asks for (`beginSubmission()` — the plugin used to invent its own `requestId`, so the model received the picture and the conversation showed nothing) and reports a refusal honestly (the host resolves with `{ ok: false }` rather than throwing). The test's mock now reads `this.remote` the way the host does, which is what makes all three observable ([#7](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/7)). It became 0.6.8.
+- **[azsora](https://github.com/azsora)** — moved the plan tier into the Plan box as its headline line, at the balance box's own big-number size, named the box "Plan", and left no hole in the grid ([#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)). It became 0.6.8.
 - Plugin author: **[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## Acknowledgements

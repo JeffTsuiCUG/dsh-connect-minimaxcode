@@ -69,6 +69,15 @@ interface SessionsContext {
         signal?: AbortSignal,
         requestId?: string,
       ) => Promise<unknown>
+      /**
+       * Registers the local submission echo the host shows for a prompt it
+       * accepted. The identity it mints is the one `prompt` must carry.
+       */
+      beginSubmission?: (input: {
+        mode: 'queue' | 'steer'
+        text: string
+        attachments: unknown[]
+      }) => { requestId: string; abandon?: () => void }
     }
   } | undefined
   /** The session's scope, which carries the conversation service. */
@@ -350,6 +359,7 @@ interface StatusDocument {
     usageBestDay: 'Busiest day {date}',
     planNoSubscription: 'No M Plan subscription (credits only), so there are no usage windows',
     planGeneric: 'M Plan subscription',
+
     planExpires: 'until {date}',
     generateTitle: 'Generate',
     generateImage: 'Image',
@@ -830,6 +840,13 @@ interface StatusDocument {
          * `binding(id).session.prompt(content, mode, signal, requestId)` is
          * what the composer calls when the person presses send, so a picture
          * sent this way is a normal turn.
+         *
+         * The method is taken off the session object, so it has to be bound to
+         * that object before it is called. `prompt` reaches the gateway
+         * through `this.remote`, and an unbound call runs with `this` pointing
+         * at the wrapper below instead of at the session — which throws
+         * `undefined is not an object (evaluating 'this.remote.session')` and
+         * leaves the dock reporting that it cannot send the picture.
          */
         const sessionFace = (): {
           prompt: (
@@ -838,12 +855,27 @@ interface StatusDocument {
             signal?: AbortSignal,
             requestId?: string,
           ) => Promise<unknown>
+          beginSubmission?: (input: {
+            mode: 'queue' | 'steer'
+            text: string
+            attachments: unknown[]
+          }) => { requestId: string; abandon?: () => void }
         } | undefined => {
           const id = sessionId()
           if (id === undefined) return undefined
           const binding = clientContext?.sessions?.binding?.(id)
-          const send = binding?.session?.prompt
-          return typeof send === 'function' ? { prompt: send } : undefined
+          const session = binding?.session
+          const send = session?.prompt
+          if (typeof send !== 'function') return undefined
+          // `beginSubmission` is taken off the session for the same reason: it
+          // is a method of the session and must keep its receiver.
+          const begin = session?.beginSubmission
+          return {
+            prompt: send.bind(session) as typeof send,
+            ...(typeof begin === 'function'
+              ? { beginSubmission: begin.bind(session) as typeof begin }
+              : {}),
+          }
         }
 
         /**
@@ -930,12 +962,29 @@ interface StatusDocument {
               )
             }
             if (face !== undefined) {
-              await face.prompt(
+              // The host registers a local submission echo before it prompts,
+              // and the identity that registration mints is the one the prompt
+              // must carry — that is how the sent picture shows up as this
+              // turn's message. A made-up identity reaches the model but leaves
+              // no echo, so the conversation would not show what was sent.
+              const submission = face.beginSubmission?.({
+                mode: 'queue',
+                text,
+                attachments: [],
+              })
+              const result = await face.prompt(
                 [part, { type: 'text', text }],
                 'queue',
                 undefined,
-                `minimax-h3-${Date.now()}`,
+                submission?.requestId,
               )
+              // A refused prompt resolves with `{ ok: false }` rather than
+              // throwing, so the outcome has to be read: either way the picture
+              // did not arrive.
+              if (result === undefined || (result as { ok?: boolean }).ok !== true) {
+                setNote(t('generateSendFailed'))
+                return
+              }
               setPrompt('')
               setOpen(false)
               // The picture's own arrival is the feedback: it is in the

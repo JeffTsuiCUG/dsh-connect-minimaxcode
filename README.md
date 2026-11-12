@@ -395,11 +395,37 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
-### 0.6.8（2026-11-12）
+### 0.6.8（2026-11-13）
+
 
 - **套餐档位移进 Plan 框**：档位与到期日原本是卡片网格里独立的一行，横在两个框下面，被拉伸成一片空白。现在档位成为 Plan 框的标题行，**字号与高度和余额框的大数字完全一致**（20px），到期日仍是原来的小字、靠右基线对齐；Plan 框的名字由「Plan 额度」简化为「Plan」。
 - **网格不再留洞**：档位行不再占一个网格单元，「每日签到」与「到期批次」因此并排落到第二行，两列都填满 —— 之前左列下方那条空白与右下角的空格子一并消失。Plan 框内的高度也一行不多：档位行顶替的正是原先用来对齐行高的那个隐藏占位。
 - 档位本身仍是**上游给的值**（`token_plan_tier`），不是写死的标签：别的套餐会显示它自己的名字；只有上游没返回该字段时，才回落到「M Plan 订阅」。
+
+
+- **修复「无法发送到对话」：会话方法没有绑定 `this`**。这一版之前，输入框里的「生成图片」**必然**失败，提示「无法发送到对话，请到插件页生成后下载」。原因在插件把 `session.prompt` 从会话对象上摘下来之后，以独立函数的方式调用：
+
+  ```ts
+  const send = binding?.session?.prompt
+  return typeof send === 'function' ? { prompt: send } : undefined
+  ```
+
+  宿主自己的 `Session.prompt` 是**通过 `this.remote` 走到网关**的：
+
+  ```ts
+  result = await this.remote.session.prompt({ ... })
+  ```
+
+  方法一旦被摘下来，`this` 就不再指向会话，而是指向外面那个 `{ prompt: send }` 包装对象，于是 `this.remote` 是 `undefined`，调用抛出 `undefined is not an object (evaluating 'this.remote.session')`。现在方法被绑回会话对象（`beginSubmission` 同理），图片就能真正发出去了。
+
+  顺带一提：同一个文件里的草稿通道**一直**写着 `create.bind(conversation)`，只是发送通道漏了 —— 而发送通道优先，草稿通道根本走不到，所以那个正确的绑定救不了场。
+
+- **发图现在会出现在对话里**。此前插件自己编了一个 `requestId`（`minimax-h3-${Date.now()}`）交给 `prompt()`：模型能收到图片，但**对话里不显示这条消息** —— 宿主要求先用 `beginSubmission()` 注册一次本地回执、再用它给出的身份发送。现在照宿主输入框的做法走，图片作为这一轮消息的一部分出现。
+
+- **不再把失败当成功**。`prompt()` 被拒绝时返回的是 `{ ok: false }` 而不是抛异常，插件此前会把它当成功、把提示条清空，于是屏幕上什么都不剩。现在会读出结果，拒绝时如实说「无法发送到对话」。
+
+- **新增回归测试（3 个用例）**。此前 `tests/generate-dock.spec.ts` 的 mock 是个**不读 `this`** 的箭头函数，因此方法有没有绑定根本测不出来 —— 真实宿主要读 `this.remote`，差别正在于此。这次的新用例让 mock 像宿主一样读 `this.remote`，三条断言分别钉住：调用带着会话当接收者、发送的是 `beginSubmission` 给出的身份、宿主拒绝时如实提示。**把这三条用例里的修复撤掉，它们会立刻失败。**
+
 
 ### 0.6.7（2026-11-12）
 
@@ -662,6 +688,8 @@ dsh plugin --profile desktop add dsh-qoder-connect
 - **[azsora](https://github.com/azsora)** —— 从桌面 App 的实际调用里找出了套餐的**限额窗口接口**，并把 5 小时与每周两个窗口的用量接进了积分胶囊与插件页卡片（[#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)）：窗口时长从响应自身的起止字段推导，不写死。该功能成为 0.5.5。
 - **[qzz19970504](https://github.com/qzz19970504)** —— 定位并修复了「发图必然失败」的接线缺口（[#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)）：模型目录声明了 `image` 模态，但适配器没有把宿主的持久化附件服务接上，导致带图请求被 pi-ai 在发出前拒掉。该修复成为 0.5.3。
 - **[azsora](https://github.com/azsora)** —— 找出官方额度接口改名并反转语义（「已用百分比」→「剩余百分比」）这件事，补上了「200 但形状读不懂时也要回落旧路径」的缺口，并把积分胶囊与插件页卡片重排为圆角分栏、让「为什么没有窗口」逐项有说法（[#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)）。该合并成为 0.6.7。
+- **[lulunick](https://github.com/lulunick)** —— 找到了「生成图片**必然**失败」的真正原因：插件把 `session.prompt` 从会话对象上摘下来后以独立函数调用，`this` 因此指向了包装对象而不是会话，宿主自己的 `Session.prompt` 正是通过 `this.remote` 走到网关的，于是抛 `undefined is not an object`。方法被绑回会话后图片才真正发得出去；顺带补上了宿主要求的 `beginSubmission()` 本地回执（此前插件自己编 `requestId`，模型收到了图片但对话里不显示），以及被拒绝时（返回 `{ ok: false }` 而非抛异常）的如实提示。他同时把测试里的 mock 改成像宿主一样读 `this.remote`，让这三点钉得住（[#7](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/7)）。该修复成为 0.6.8。
+- **[azsora](https://github.com/azsora)** —— 把套餐档位移进 Plan 框当标题行，字号与余额框的大数字一致，Plan 框改名为「Plan」，网格也不再留洞（[#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)）。该重排成为 0.6.8。
 - 插件作者：**[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## 致谢
