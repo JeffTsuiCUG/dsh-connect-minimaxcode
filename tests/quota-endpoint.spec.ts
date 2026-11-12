@@ -55,6 +55,34 @@ function windowsDocument(): unknown {
   }
 }
 
+/**
+ * The documented endpoint's own shape, captured from a plugin-signed-in
+ * account: it reports how much of each window is *left*, and carries no used
+ * field at all — which is what left the windows unreadable before.
+ */
+function documentedRemainsDocument(): unknown {
+  return {
+    model_remains: [
+      {
+        model_name: 'general',
+        start_time: 1_794_407_352_919,
+        end_time: 1_794_425_352_919,
+        remains_time: 15_256_098,
+        current_interval_total_count: 0,
+        current_interval_usage_count: 0,
+        current_interval_status: 1,
+        current_interval_remaining_percent: 96,
+        weekly_start_time: 1_794_388_713_567,
+        weekly_end_time: 1_794_993_513_567,
+        weekly_remains_time: 583_416_746,
+        current_weekly_status: 1,
+        current_weekly_remaining_percent: 97,
+      },
+    ],
+    base_resp: { status_code: 0, status_msg: 'success' },
+  }
+}
+
 /** A request the fetch stub saw. */
 interface Seen {
   url: string
@@ -125,6 +153,17 @@ describe('fetchTokenPlanWindows', () => {
     expect(seen[0]?.authorization).toBe(`Bearer ${PLAN_KEY}`)
   })
 
+  it('reads the documented response remaining percent as the used share', async () => {
+    const fetchImpl = routingFetch({
+      [TOKEN_PLAN_REMAINS_PATH]: () => new Response(JSON.stringify(documentedRemainsDocument()), { status: 200 }),
+    })
+    const read = await fetchTokenPlanWindows(PLAN_KEY, 'cn', fetchImpl)
+    // 96 left means 4 used; the remaining field is the only one it sends.
+    expect(read.windows?.interval.usedPercent).toBe(4)
+    expect(read.windows?.weekly.usedPercent).toBe(3)
+    expect(read.error).toBeUndefined()
+  })
+
   it('reports an account with no subscription as having no windows, not as a failure', async () => {
     const fetchImpl = routingFetch({
       [TOKEN_PLAN_REMAINS_PATH]: () => new Response(JSON.stringify({
@@ -177,6 +216,25 @@ describe('MinimaxCredits quota reading', () => {
     expect(seen.some(s => s.url.includes(TOKEN_PLAN_REMAINS_PATH))).toBe(true)
     const quota = seen.find(s => s.url.includes(TOKEN_PLAN_REMAINS_PATH))
     expect(quota?.authorization).toBe(`Bearer ${PLAN_KEY}`)
+  })
+
+  it('falls back to the older path when the documented one reads as nothing', async () => {
+    // A 200 that carries no readable window used to end the chain: the older
+    // path was only asked after a thrown request, never after a bad body.
+    const credits = new MinimaxCredits()
+    const seen: Seen[] = []
+    await credits.refresh(CREDENTIAL, 'cn', routingFetch({
+      'get_membership_info': () => membership('100'),
+      [TOKEN_PLAN_CREDIT_PATH]: () => new Response(JSON.stringify({ api_key: PLAN_KEY }), { status: 200 }),
+      [TOKEN_PLAN_REMAINS_PATH]: () => new Response(JSON.stringify({
+        model_remains: [],
+        base_resp: { status_code: 0, status_msg: 'success' },
+      }), { status: 200 }),
+      [REMAINS_PERCENT_PATH]: () => new Response(JSON.stringify(windowsDocument()), { status: 200 }),
+    }, seen), 1000)
+    expect(credits.rateLimit?.interval.usedPercent).toBe(19)
+    expect(credits.rateLimitError).toBeUndefined()
+    expect(seen.some(s => s.url.includes(REMAINS_PERCENT_PATH))).toBe(true)
   })
 
   it('remembers the plan key between reads', async () => {
