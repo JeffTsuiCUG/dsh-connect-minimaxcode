@@ -137,6 +137,16 @@ export interface UsageStatus {
   requests: number
 }
 
+/** The plan the account subscribes to, as the card reads it. */
+export interface PlanStatus {
+  /** Whether the account holds a plan. */
+  active: boolean
+  /** The tier's name, as the upstream spells it ("Go"). */
+  tier?: string
+  /** When the plan ends, in milliseconds since the epoch. */
+  expiresAtMs?: number
+}
+
 /** The plan's two rolling usage windows, as the card reads them. */
 export interface RateLimitStatus {
   /** Whether the windows could be read. */
@@ -225,6 +235,8 @@ export interface StatusDocument {
   login?: LoginStatus
   /** The account's usage profile, when it could be read. */
   usageProfile?: UsageProfileStatus
+  /** The plan the account subscribes to, when there is one. */
+  plan?: PlanStatus
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -261,6 +273,8 @@ export interface StatusDeps {
   login?: LoginStatus
   /** The account's usage profile, when the account API could be reached. */
   usageProfile?: UsageProfileStatus
+  /** The plan the account subscribes to, when there is one. */
+  plan?: PlanStatus
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -303,6 +317,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.signin === undefined ? {} : { signin: deps.signin },
     ...deps.login === undefined ? {} : { login: deps.login },
     ...deps.usageProfile === undefined ? {} : { usageProfile: deps.usageProfile },
+    ...deps.plan === undefined ? {} : { plan: deps.plan },
     ...deps.capability === undefined ? {} : { capability: deps.capability },
     ...deps.generation === undefined ? {} : { generation: deps.generation },
   }

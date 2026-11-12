@@ -384,6 +384,12 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.5 (2026-11-12)
+
+- **Fixed "the limit windows never showed up"**: once a plan is held, the upstream changed the quota endpoint's **field names and its meaning** — from the share *used* (the string `"19%"`) to the share *remaining* (the number `90`). The plugin still read the old names, so the windows either could not be read at all or read as the opposite. Both shapes are accepted now, and what leaves the plugin is always the share *used*: 92% remaining is 8% used. The window length is still derived from the answer's own edges (measured: five hours and seven days) rather than assumed.
+- **Added the plan to the card**: the membership answer now names the tier and the day it ends (`token_plan_tier`, `token_plan_expires_at`), and the plugin shows one more line in the pill detail and on the plugin page — "Go · until 2026-12-11". It comes from the same answer as the balance, so it costs no extra request.
+- **An account without a plan sees exactly what it saw before**: the plan fields are simply absent there, so the plugin shows nothing about a plan; the windows are still absent, and the card still says "No M Plan subscription (credits only), so there are no usage windows". The new `tests/free-account.spec.ts` pins that whole path for a free account (balance, plan, windows), and `tests/plan.spec.ts` covers the new field shape, the old one and the free account.
+
 ### 0.6.4 (2026-11-11)
 
 - **Fixed "the self-check report never appeared"**: the previous version put the self-check in the client half (the card reports what the host offered), but **the server half was never landed** — the status document had no field to carry the report and no route to receive it, so the card reported into nowhere. It is complete now: the report is received by the plugin's own route and appears in the status document as `capability`.

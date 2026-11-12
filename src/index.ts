@@ -27,7 +27,7 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type PlanStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import {
   GenerationError,
   IMAGE_AREAS,
@@ -71,8 +71,10 @@ export {
   MinimaxCredits,
   ensureOAuthCredential,
   fetchCreditSummary,
+  fetchMembershipDocument,
   fetchRateLimitWindows,
   parseCreditSummary,
+  parsePlanSummary,
   parseOAuthDocument,
   parseRateLimitWindows,
   readOAuthCredential,
@@ -83,6 +85,7 @@ export {
   REMAINS_PERCENT_PATH,
   type CreditSummary,
   type OAuthCredential,
+  type PlanSummary,
   type OAuthState,
   type RateLimitWindows,
 } from './credits.ts'
@@ -244,6 +247,8 @@ function apply(ctx: Context) {
   let revokedByServer = false
   /** What the card last reported about what the host offered it. */
   let capability: { at: number; findings: Record<string, string> } | undefined
+  /** The plan the account subscribes to, as the last read found it. */
+  let plan: PlanStatus | undefined
 
   /**
    * Give up on the plugin's own credential after the server refused it.
@@ -563,6 +568,17 @@ function apply(ctx: Context) {
     }
   }
 
+  /**
+   * The plan the account holds, as the card reads it.
+   *
+   * It comes from the same membership answer as the balance, so it is free.
+   */
+  const buildPlanStatus = (): PlanStatus | undefined => {
+    const held = credits.plan
+    if (held === undefined) return undefined
+    return { active: held.active, tier: held.tier, expiresAtMs: held.expiresAtMs }
+  }
+
   /** The plan's rolling usage windows as the card reads them. */
   const buildRateLimitStatus = (): RateLimitStatus => {
     if (creditState === 'signed-out' || creditState === 'expired') {
@@ -736,6 +752,7 @@ function apply(ctx: Context) {
       signin: buildSigninStatus(),
       login: buildLoginStatus(),
       usageProfile: buildUsageProfileStatus(),
+      plan: buildPlanStatus(),
       capability,
       generation: {
         imageModels: [...IMAGE_MODELS],

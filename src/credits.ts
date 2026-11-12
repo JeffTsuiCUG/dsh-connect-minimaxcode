@@ -326,6 +326,52 @@ export interface CreditSummary {
 }
 
 /**
+ * The plan the account subscribes to.
+ *
+ * An account without one still reads a balance — it simply has no rolling
+ * windows, which is what the limit readout used to report as missing. With a
+ * plan the upstream names the tier and the day it ends, and both are worth
+ * showing: the tier says what the account has, the day says how long it has.
+ */
+export interface PlanSummary {
+  /** The tier's name, as the upstream spells it ("Go"). */
+  tier?: string
+  /** When the plan ends, in milliseconds since the epoch. */
+  expiresAtMs?: number
+  /** Whether the upstream reports an active plan at all. */
+  active: boolean
+}
+
+/**
+ * Read the plan out of a membership response.
+ *
+ * The upstream only fills these in for an account that subscribes: without a
+ * plan `has_token_plan` is false and the tier is absent. `subscription_type`
+ * says so too — "mplan" once a plan is held, "none" before.
+ *
+ * @returns The plan, or `undefined` when the response carries no plan fields.
+ */
+export function parsePlanSummary(document: unknown): PlanSummary | undefined {
+  if (typeof document !== 'object' || document === null) return undefined
+  const record = document as Record<string, unknown>
+  const hasTokenPlan = record.has_token_plan
+  const tier = typeof record.token_plan_tier === 'string' && record.token_plan_tier.length > 0
+    ? record.token_plan_tier
+    : undefined
+  // A zero day is not a day: an account without a plan may carry the field
+  // set to zero, and reporting "expires 1970" would be noise on a card that
+  // every free account sees.
+  const expires = toNumber(record.token_plan_expires_at)
+  const expiresAtMs = expires === undefined || expires <= 0 ? undefined : expires
+  if (hasTokenPlan !== true && tier === undefined && expiresAtMs === undefined) return undefined
+  return {
+    tier,
+    expiresAtMs,
+    active: hasTokenPlan === true || tier !== undefined,
+  }
+}
+
+/**
  * Read the credit summary out of a membership response.
  *
  * The app's settings page prefers the summary and falls back to the flat
@@ -364,6 +410,32 @@ function toNumber(value: unknown): number | undefined {
 }
 
 /**
+ * Fetch the membership document.
+ *
+ * One answer carries several things: the credit balance, the plan the
+ * account subscribes to, and when that plan ends. They are read together so
+ * that the account is asked once.
+ */
+export async function fetchMembershipDocument(
+  credential: OAuthCredential,
+  region: MinimaxRegion,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Record<string, unknown> | undefined> {
+  const response = await fetchImpl(`${MINIMAX_ACCOUNT_HOSTS[region]}${MEMBERSHIP_PATH}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${credential.token}` },
+    body: '{}',
+  })
+  if (!response.ok) {
+    throw new Error(`membership request failed: HTTP ${response.status}`)
+  }
+  const document = await response.json()
+  return typeof document === 'object' && document !== null
+    ? document as Record<string, unknown>
+    : undefined
+}
+
+/**
  * Fetch the current credit balance.
  *
  * @returns The balance, or `undefined` when the account has no credit summary.
@@ -373,15 +445,8 @@ export async function fetchCreditSummary(
   region: MinimaxRegion,
   fetchImpl: typeof fetch = fetch,
 ): Promise<CreditSummary | undefined> {
-  const response = await fetchImpl(`${MINIMAX_ACCOUNT_HOSTS[region]}${MEMBERSHIP_PATH}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${credential.token}` },
-    body: '{}',
-  })
-  if (!response.ok) {
-    throw new Error(`membership request failed: HTTP ${response.status}`)
-  }
-  return parseCreditSummary(await response.json())
+  const document = await fetchMembershipDocument(credential, region, fetchImpl)
+  return document === undefined ? undefined : parseCreditSummary(document)
 }
 
 /** The balance plus what changed since the previous read. */
@@ -511,19 +576,24 @@ export interface RateLimitWindows {
 }
 
 /**
- * Read the two rate-limit windows out of a remains-percent response.
+ * Read the two rate-limit windows out of a remains response.
  *
  * The upstream answers with one entry per metered group; the general one is
  * the only one the plan meters today, and the first entry is used when it is
- * absent. The percents arrive as strings ("19%"), and the counts arrive as -1
- * when the plan does not meter by count, so only the percents and the window
- * edges are read. The window length is derived from the entry's own endpoints
- * rather than assumed to be five hours or seven days — the plan's terms have
+ * absent. The window length is derived from the entry's own endpoints rather
+ * than assumed to be five hours or seven days — the plan's terms have
  * changed before, and the display should follow whatever the server says.
  *
  * A window the server marks as unlimited (`current_*_status` of 3) carries no
  * allowance to be a percentage of, so it produces no window at all: reporting
  * "0%" of an unlimited quota would be a number nobody can act on.
+ *
+ * **Which share the upstream reports changed.** It used to answer with the
+ * share already used, as a string ("19%"); with a plan subscribed it answers
+ * with the share still *remaining*, as a plain number (90). Both are
+ * accepted, and the two are opposites, so what leaves this function is
+ * always the share used — otherwise the same window would read 90% used on
+ * a plan that has barely spent anything.
  */
 export function parseRateLimitWindows(document: unknown): RateLimitWindows | undefined {
   if (typeof document !== 'object' || document === null) return undefined
@@ -536,12 +606,14 @@ export function parseRateLimitWindows(document: unknown): RateLimitWindows | und
   const record = entry as Record<string, unknown>
   const interval = readWindow(
     record.current_interval_used_percent,
+    record.current_interval_remaining_percent,
     record.start_time,
     record.end_time,
     record.current_interval_status,
   )
   const weekly = readWindow(
     record.current_weekly_used_percent,
+    record.current_weekly_remaining_percent,
     record.weekly_start_time,
     record.weekly_end_time,
     record.current_weekly_status,
@@ -557,15 +629,32 @@ export function parseRateLimitWindows(document: unknown): RateLimitWindows | und
  */
 const UNLIMITED_STATUS = 3
 
+/**
+ * The share of a window's allowance already used, whichever way it is reported.
+ *
+ * The endpoint named the used share `current_*_used_percent` and then
+ * renamed it to `current_*_remaining_percent` while inverting its meaning.
+ * The used share is what a person needs, so it is what this returns; the
+ * remaining share is subtracted from a hundred to get there.
+ */
+function readUsedPercent(used: unknown, remaining: unknown): number | undefined {
+  const usedPercent = parsePercent(used)
+  if (usedPercent !== undefined) return usedPercent
+  const remainingPercent = parsePercent(remaining)
+  if (remainingPercent === undefined) return undefined
+  return 100 - remainingPercent
+}
+
 /** Assemble one window from its percent and edge fields; all must be present. */
 function readWindow(
   percent: unknown,
+  remainingPercent: unknown,
   startAtMs: unknown,
   resetAtMs: unknown,
   status: unknown,
 ): UsageWindow | undefined {
   if (status === UNLIMITED_STATUS) return undefined
-  const usedPercent = parsePercent(percent)
+  const usedPercent = readUsedPercent(percent, remainingPercent)
   const start = toNumber(startAtMs)
   const reset = toNumber(resetAtMs)
   if (usedPercent === undefined || start === undefined || reset === undefined) return undefined
@@ -846,6 +935,7 @@ export class MinimaxCredits {
   #ledgerError: string | undefined
   #rateLimit: RateLimitWindows | undefined
   #rateLimitError: string | undefined
+  #plan: PlanSummary | undefined
   #rateLimitAbsence: 'no-subscription' | undefined
   #rateLimitAtMs: number | undefined
   #usageProfile: UsageProfile | undefined
@@ -892,6 +982,11 @@ export class MinimaxCredits {
     return this.#rateLimitError
   }
 
+  /** The plan the account subscribes to, as the last read found it. */
+  get plan(): PlanSummary | undefined {
+    return this.#plan
+  }
+
   /** Why the plan has no windows, when the upstream said so plainly. */
   get rateLimitAbsence(): 'no-subscription' | undefined {
     return this.#rateLimitAbsence
@@ -931,7 +1026,11 @@ export class MinimaxCredits {
   ): Promise<boolean> {
     let changed = false
     try {
-      const summary = await fetchCreditSummary(credential, region, fetchImpl)
+      const document = await fetchMembershipDocument(credential, region, fetchImpl)
+      // The same answer carries the plan, so it is read here rather than by
+      // asking the account a second time.
+      if (document !== undefined) this.#plan = parsePlanSummary(document)
+      const summary = document === undefined ? undefined : parseCreditSummary(document)
       if (summary === undefined) {
         this.#error = 'membership response carried no credit summary'
       } else {

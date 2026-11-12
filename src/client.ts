@@ -147,6 +147,11 @@ interface StatusDocument {
     reason?: 'no-subscription'
     error?: string
   }
+  plan?: {
+    active: boolean
+    tier?: string
+    expiresAtMs?: number
+  }
   usageProfile?: {
     state: 'ok' | 'unavailable'
     totalDays?: number
@@ -252,6 +257,8 @@ interface StatusDocument {
     usageRanking: '用量排名前 {percent}%',
     usageBestDay: '最活跃的一天 {date}',
     planNoSubscription: '未订阅 M Plan（仅积分包），因此没有限额窗口',
+    planGeneric: 'M Plan 订阅',
+    planExpires: '{date} 到期',
     generateTitle: '生成',
     generateImage: '图片',
     generateVideo: '视频',
@@ -330,6 +337,8 @@ interface StatusDocument {
     usageRanking: 'Top {percent}% by usage',
     usageBestDay: 'Busiest day {date}',
     planNoSubscription: 'No M Plan subscription (credits only), so there are no usage windows',
+    planGeneric: 'M Plan subscription',
+    planExpires: 'until {date}',
     generateTitle: 'Generate',
     generateImage: 'Image',
     generateVideo: 'Video',
@@ -571,6 +580,26 @@ interface StatusDocument {
         return h('div', { style: mutedStyle, 'data-minimax-plan-notice': true }, t('planNoSubscription'))
       }
 
+      /**
+       * The plan the account holds, when it holds one.
+       *
+       * An account without a plan has nothing to say here, and the card shows
+       * it nothing: the rolling windows it does not have are already
+       * explained by the notice beside them. What this adds is for the
+       * accounts that do hold one — the tier's name and the day it ends.
+       */
+      function planLine(t: (key: string, params?: Record<string, unknown>) => string, plan?: StatusDocument['plan']): unknown {
+        if (plan === undefined || !plan.active) return null
+        const tier = plan.tier ?? t('planGeneric')
+        const expiry = plan.expiresAtMs === undefined
+          ? null
+          : t('planExpires', { date: day(plan.expiresAtMs) })
+        return h('div', { style: rowStyle, 'data-minimax-plan': true },
+          h('span', null, tier),
+          h('span', null, expiry ?? ''),
+        )
+      }
+
       /** The pill itself; the gate decides whether it is drawn at all. */
       function CreditPill(props: SlotProps) {
         const [status] = useStatus()
@@ -612,6 +641,7 @@ interface StatusDocument {
             expiryBlock(t, credits_),
             rateLimitBlock(t, status?.rateLimit),
             planNotice(t, status?.rateLimit),
+            planLine(t, status?.plan),
             usageProfileBlock(t, status?.usageProfile),
             usage !== undefined
               ? h('div', { style: rowStyle },
@@ -1254,6 +1284,7 @@ interface StatusDocument {
           expiryBlock(t, credits_),
           rateLimitBlock(t, status?.rateLimit),
           planNotice(t, status?.rateLimit),
+          planLine(t, status?.plan),
           signinBlock(t, signin, refresh),
           h('div', { style: sectionTitleStyle }, t('lots')),
           (credits_!.upcoming ?? []).length === 0
