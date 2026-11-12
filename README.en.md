@@ -384,6 +384,12 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.8 (2026-11-12)
+
+- **The plan tier moved into the Plan box**: the tier and the day it ends used to be a row of their own below the two boxes, stretched into a band of empty space. The tier is now the Plan box's headline line, wearing **the balance's own big-number size and height** (20px), and the day it ends stays the small text it was, on the right and on the tier's baseline; the box itself is named "Plan" rather than "Plan allowance".
+- **The grid has no hole any more**: the tier row no longer occupies a grid cell, so the check-in and the expiring grants now sit side by side in the second row and both columns are filled — the empty band under the left column and the hole at the bottom right are gone together. The Plan box did not grow by a row either: the tier line takes the place of the invisible number that used to hold the row height open.
+- The tier is still **the value the upstream sends** (`token_plan_tier`), not a fixed label: another plan shows its own name, and only an answer without that field falls back to "M Plan subscription".
+
 ### 0.6.7 (2026-11-12)
 
 - **Merged PR [#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5) by [azsora](https://github.com/azsora)**:
