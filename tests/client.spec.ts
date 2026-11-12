@@ -51,6 +51,7 @@ const STATUS = {
  */
 function reactHarness() {
   const states: unknown[] = []
+  const refs: { current: unknown }[] = []
   let cursor = 0
   const react = {
     createElement: (type: unknown, props?: unknown, ...children: unknown[]) => ({
@@ -66,6 +67,13 @@ function reactHarness() {
       return [states[index], (next: unknown) => {
         states[index] = next
       }]
+    },
+    useRef: (initial: unknown) => {
+      const index = cursor++
+      if (refs.length <= index) {
+        refs[index] = { current: initial }
+      }
+      return refs[index]!
     },
     useEffect: (effect: () => unknown) => {
       void effect()
@@ -276,9 +284,11 @@ describe('client bundle', () => {
     harness.render(page!, { view: 'page' })
     await new Promise(resolve => setTimeout(resolve, 10))
     const tree = JSON.stringify(harness.render(page!, { view: 'page' }))
-    expect(tree).toContain('即将过期')
+    // The expiring row names its window and carries only the amount; the date
+    // it lands on is the pill detail's row, not the page card's.
+    expect(tree).toContain('3天内过期')
     expect(tree).toContain('2,858.09')
-    expect(tree).toContain('2026-10-29')
+    expect(tree).not.toContain('即将过期')
     expect(tree).toMatch(/11[,.]?326[.,]88/)
   })
 

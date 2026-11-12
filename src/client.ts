@@ -205,9 +205,9 @@ interface StatusDocument {
   const MINIMAX_PROVIDER_ID = 'minimaxcode'
 
   const zh: Record<string, string> = {
-    title: 'MiniMax Code 积分',
+    title: 'MiniMax Code',
     balance: '积分 {total}',
-    free: '赠送积分',
+    free: '签到积分',
     purchased: '购买积分',
     consumed: '上次读取后消耗',
     tokens: '本机累计 {count} tokens',
@@ -219,9 +219,15 @@ interface StatusDocument {
     signedOut: '未登录 MiniMax Code',
     expiring: '即将过期',
     expiringIn: '{amount} 积分 · {date} 到期',
-    expiringNone: '7 天内没有积分到期',
+    expiringNone: '3 天内没有积分到期',
     expiringSoon: '30 天内到期 {amount} 积分',
+    expiring3d: '3天内过期',
+    expiringAmount: '{amount} 积分',
     nextExpiry: '最近到期日',
+    creditsBox: '积分',
+    planTitle: 'Plan 额度',
+    usageTitle: '本机用量',
+    usageTotal: '累计',
     lots: '到期批次',
     noLots: '没有待到期的积分批次',
     loginTitle: '登录',
@@ -283,9 +289,9 @@ interface StatusDocument {
     generateNoInput: '输入框不接受附件。',
   }
   const en: Record<string, string> = {
-    title: 'MiniMax Code credits',
+    title: 'MiniMax Code',
     balance: '{total} credits',
-    free: 'Free credits',
+    free: 'Check-in credits',
     purchased: 'Purchased credits',
     consumed: 'Spent since last read',
     tokens: '{count} tokens used here',
@@ -297,9 +303,15 @@ interface StatusDocument {
     signedOut: 'MiniMax Code not signed in',
     expiring: 'Expiring soon',
     expiringIn: '{amount} credits · expires {date}',
-    expiringNone: 'No credits expire within 7 days',
+    expiringNone: 'No credits expire within 3 days',
     expiringSoon: '{amount} credits expire within 30 days',
+    expiring3d: 'Expires in 3 days',
+    expiringAmount: '{amount} credits',
     nextExpiry: 'Next expiry',
+    creditsBox: 'Credits',
+    planTitle: 'Plan allowance',
+    usageTitle: 'Local usage',
+    usageTotal: 'Total',
     lots: 'Expiring grants',
     noLots: 'No grant is waiting to expire',
     loginTitle: 'Sign-in',
@@ -370,6 +382,7 @@ interface StatusDocument {
       const React = require('react') as {
         createElement: (type: unknown, props?: unknown, ...children: unknown[]) => unknown
         useEffect: (effect: () => (() => void) | void, deps?: unknown[]) => void
+        useRef: <T>(initial: T) => { current: T }
         useState: <T>(initial: T) => [T, (next: T) => void]
       }
       const h = React.createElement
@@ -461,24 +474,24 @@ interface StatusDocument {
         return h('div', { style: rowStyle }, h('span', null, label), h('span', null, value))
       }
 
-      /** The expiry block, shared by the pill's detail and the page card. */
-      function expiryBlock(t: (key: string, params?: Record<string, unknown>) => string, credits_?: StatusDocument['credits']): unknown {
-        if (credits_ === undefined) return null
+      /**
+       * The expiry rows, shared by the pill's detail and the page card.
+       *
+       * The label names the window the count actually covers, and the value
+       * carries only the amount: when the lot falls due is the next row's
+       * business, not a suffix on this one.
+       */
+      function expiryRows(t: (key: string, params?: Record<string, unknown>) => string, credits_?: StatusDocument['credits']): unknown[] {
+        if (credits_ === undefined) return []
         const expiring = credits_.expiring ?? 0
         const next = credits_.nextExpiryAtMs
-        return h('div', { style: expiryBoxStyle, 'data-minimax-credits-expiry': true },
+        return [
           h('div', { style: rowStyle },
-            h('span', null, t('expiring')),
+            h('span', null, t('expiring3d')),
             h('span', { style: expiring > 0 ? warnStyle : undefined },
-              expiring > 0
-                ? t('expiringIn', { amount: credits(expiring, 2), date: day(next) })
-                : t('expiringNone')),
-          ),
-          credits_.expiringSoon !== undefined && credits_.expiringSoon > 0
-            ? row(t('expiringSoon', { amount: credits(credits_.expiringSoon, 2) }), '')
-            : null,
+              expiring > 0 ? t('expiringAmount', { amount: credits(expiring, 2) }) : t('expiringNone'))),
           next !== undefined ? row(t('nextExpiry'), day(next)) : null,
-        )
+        ]
       }
 
       /**
@@ -520,42 +533,42 @@ interface StatusDocument {
        * rather than written into the label: the plan's terms have changed
        * before, and the display should follow whatever the server says.
        */
-      function rateLimitBlock(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown {
-        if (rateLimit === undefined || rateLimit.state !== 'ok') return null
-        if (rateLimit.interval === undefined || rateLimit.weekly === undefined) return null
-        return h('div', { style: expiryBoxStyle, 'data-minimax-rate-limit': true },
+      function rateLimitRows(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown[] {
+        if (rateLimit === undefined || rateLimit.state !== 'ok') return []
+        if (rateLimit.interval === undefined || rateLimit.weekly === undefined) return []
+        return [
           row(t('usageWindow', { duration: windowLabel(rateLimit.interval) }), `${rateLimit.interval.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.interval.resetAtMs) })})`),
           row(t('usageWindow', { duration: windowLabel(rateLimit.weekly) }), `${rateLimit.weekly.usedPercent}%(${t('resetIn', { duration: countdown(rateLimit.weekly.resetAtMs) })})`),
-        )
+        ]
       }
 
       /**
-       * The account's own usage history.
+       * The account's own usage history, as label lines.
        *
        * This is not the token count of this host — the pill reports that
        * separately — but the account's days, consumption and standing, which
-       * is what the upstream knows and nobody else does.
+       * is what the upstream knows and nobody else does. It belongs to the
+       * page card only, laid out in two columns.
        */
-      function usageProfileBlock(t: (key: string, params?: Record<string, unknown>) => string, profile?: StatusDocument['usageProfile']): unknown {
-        if (profile === undefined || profile.state !== 'ok') return null
-        const rows: unknown[] = []
+      function usageProfileRows(t: (key: string, params?: Record<string, unknown>) => string, profile?: StatusDocument['usageProfile']): string[] {
+        if (profile === undefined || profile.state !== 'ok') return []
+        const lines: string[] = []
         if (profile.consecutiveDays !== undefined && profile.consecutiveDays > 0) {
-          rows.push(row(t('usageStreak', { days: profile.consecutiveDays }), ''))
+          lines.push(t('usageStreak', { days: profile.consecutiveDays }))
         }
         if (profile.activeDays !== undefined) {
-          rows.push(row(t('usageActiveDays', { active: profile.activeDays, total: profile.totalDays ?? '' }), ''))
+          lines.push(t('usageActiveDays', { active: profile.activeDays, total: profile.totalDays ?? '' }))
         }
         if (profile.totalTokenConsumed !== undefined) {
-          rows.push(row(t('usageTotalTokens', { count: profile.totalTokenConsumed }), ''))
+          lines.push(t('usageTotalTokens', { count: profile.totalTokenConsumed }))
         }
         if (profile.rankingPercent !== undefined) {
-          rows.push(row(t('usageRanking', { percent: profile.rankingPercent.toFixed(1) }), ''))
+          lines.push(t('usageRanking', { percent: profile.rankingPercent.toFixed(1) }))
         }
         if (profile.mostActiveDay?.date !== undefined) {
-          rows.push(row(t('usageBestDay', { date: profile.mostActiveDay.date }), ''))
+          lines.push(t('usageBestDay', { date: profile.mostActiveDay.date }))
         }
-        if (rows.length === 0) return null
-        return h('div', { style: expiryBoxStyle, 'data-minimax-usage-profile': true }, ...rows)
+        return lines
       }
 
       /**
@@ -571,10 +584,45 @@ interface StatusDocument {
         return h('div', { style: mutedStyle, 'data-minimax-plan-notice': true }, t('planNoSubscription'))
       }
 
+      /**
+       * What the page card's plan box says when it has no windows to show.
+       *
+       * An empty box would read as "nothing loaded yet" and invite a refresh
+       * that cannot help. Every state has a reason worth naming: no sign-in,
+       * a stale one, a plan without windows, or a read that failed — the
+       * upstream's own message is shown as it arrived, because it is the
+       * most specific answer available.
+       */
+      function rateLimitFallback(t: (key: string, params?: Record<string, unknown>) => string, rateLimit?: StatusDocument['rateLimit']): unknown {
+        if (rateLimit === undefined) {
+          return h('div', { style: mutedStyle }, t('unavailable'))
+        }
+        if (rateLimit.reason === 'no-subscription') {
+          return h('div', { style: mutedStyle, 'data-minimax-plan-notice': true }, t('planNoSubscription'))
+        }
+        if (rateLimit.state === 'signed-out') {
+          return h('div', { style: mutedStyle }, t('signedOut'))
+        }
+        if (rateLimit.state === 'expired') {
+          return h('div', { style: mutedStyle }, t('expired'))
+        }
+        if (rateLimit.error !== undefined && rateLimit.error.length > 0) {
+          return h('div', { style: mutedStyle }, rateLimit.error)
+        }
+        return h('div', { style: mutedStyle }, t('unavailable'))
+      }
+
       /** The pill itself; the gate decides whether it is drawn at all. */
       function CreditPill(props: SlotProps) {
         const [status] = useStatus()
         const [open, setOpen] = React.useState(false)
+        // Two ways to open, and they must not fight each other: hovering the
+        // pill shows the detail, and a click pins it so it stays after the
+        // cursor leaves. A pinned detail closes on the next click — even under
+        // the cursor, which is why the click also suppresses the hover that is
+        // still in progress until the cursor actually leaves.
+        const pinned = React.useRef(false)
+        const skipHover = React.useRef(false)
         const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
           const template = zh[key] ?? key
           return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params?.[name] ?? ''))
@@ -604,24 +652,27 @@ interface StatusDocument {
 
         const detail = available
           ? h('div', { style: detailStyle, 'data-minimax-credits-detail': true },
-            row(t('free'), credits(credits_!.free, 3)),
-            row(t('purchased'), credits(credits_!.purchased, 3)),
-            credits_!.consumed !== undefined && credits_!.consumed > 0
-              ? row(t('consumed'), credits(credits_!.consumed, 3))
-              : null,
-            expiryBlock(t, credits_),
-            rateLimitBlock(t, status?.rateLimit),
-            planNotice(t, status?.rateLimit),
-            usageProfileBlock(t, status?.usageProfile),
-            usage !== undefined
-              ? h('div', { style: rowStyle },
-                h('span', null, t('tokens', { count: tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens) })),
-                h('span', null, t('cost', { amount: money(usage.estimatedCny) })))
-              : null,
-            credits_!.updatedAtMs !== undefined
-              ? row(t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }), '')
-              : null,
-          )
+            h('div', { style: detailFlowStyle },
+              h('div', { style: boxStyle },
+                row(t('free'), credits(credits_!.free, 3)),
+                row(t('purchased'), credits(credits_!.purchased, 3)),
+                credits_!.consumed !== undefined && credits_!.consumed > 0
+                  ? row(t('consumed'), credits(credits_!.consumed, 3))
+                  : null,
+              ),
+              h('div', { style: boxStyle, 'data-minimax-credits-expiry': true },
+                ...expiryRows(t, credits_)),
+              h('div', { style: boxStyle, 'data-minimax-rate-limit': true },
+                ...rateLimitRows(t, status?.rateLimit)),
+              usage !== undefined
+                ? h('div', { style: boxStyle },
+                  row(t('usageTotal'), `${tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens)} tokens(≈¥${money(usage.estimatedCny)})`))
+                : null,
+              planNotice(t, status?.rateLimit),
+              credits_!.updatedAtMs !== undefined
+                ? h('div', { style: mutedStyle }, t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }))
+                : null,
+            ))
           : null
 
         return h('div', { style: wrapStyle, 'data-minimax-credits': true },
@@ -629,7 +680,24 @@ interface StatusDocument {
             type: 'button',
             style: buttonStyle,
             title: t('title'),
-            onClick: () => setOpen(!open),
+            onMouseEnter: () => {
+              if (pinned.current || skipHover.current) return
+              setOpen(true)
+            },
+            onMouseLeave: () => {
+              skipHover.current = false
+              if (!pinned.current) setOpen(false)
+            },
+            onClick: () => {
+              if (pinned.current) {
+                pinned.current = false
+                skipHover.current = open
+                setOpen(false)
+              } else {
+                pinned.current = true
+                setOpen(true)
+              }
+            },
           }, label),
           open ? detail : null,
         )
@@ -940,12 +1008,12 @@ interface StatusDocument {
       ): unknown {
         if (login === undefined) return null
         if (login.state === 'signed-in') {
-          return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+          return h('div', { style: boxStyle, 'data-minimax-login': true },
             row(t('loginTitle'), login.source === 'plugin' ? t('loginPlugin') : t('loginDesktop')),
           )
         }
         if (login.state === 'pending') {
-          return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+          return h('div', { style: boxStyle, 'data-minimax-login': true },
             row(t('loginTitle'), t('loginPending')),
             login.userCode !== undefined && login.userCode.length > 0
               ? row(t('loginCode'), login.userCode)
@@ -961,7 +1029,7 @@ interface StatusDocument {
             h('button', { type: 'button', style: actionButtonStyle, onClick: () => { void act('login-poll') } }, t('loginPolled')),
           )
         }
-        return h('div', { style: sectionBoxStyle, 'data-minimax-login': true },
+        return h('div', { style: boxStyle, 'data-minimax-login': true },
           row(t('loginTitle'), t('loginSignedOut')),
           h('button', { type: 'button', style: actionButtonStyle, onClick: () => { void act('login-start') } }, t('loginStart')),
         )
@@ -981,13 +1049,21 @@ interface StatusDocument {
         refresh: () => void,
       ): unknown {
         if (signin === undefined) return null
-        return h('div', { style: sectionBoxStyle, 'data-minimax-signin': true },
-          h('div', { style: sectionTitleStyle }, t('signinTitle')),
+        // The day's status sits at the title's right end: it is a property of
+        // the whole block, not of the day-count row below it.
+        return h('div', { style: boxStyle, 'data-minimax-signin': true },
+          h('div', { style: rowStyle },
+            h('span', { style: boxTitleStyle }, t('signinTitle')),
+            h('span', { style: mutedStyle },
+              signin.today === undefined
+                ? t('signinUnavailable')
+                : signin.today.claimed
+                  ? t('signinClaimed')
+                  : signin.today.claimable ? t('signinClaimable') : t('signinUnavailable'))),
           signin.today === undefined
             ? h('div', { style: mutedStyle }, t('signinUnavailable'))
             : h('div', { style: rowStyle },
-              h('span', null, t('signinToday', { day: signin.today.dayNo, points: signin.today.points })),
-              h('span', null, signin.today.claimed ? t('signinClaimed') : signin.today.claimable ? t('signinClaimable') : t('signinUnavailable'))),
+              h('span', null, t('signinToday', { day: signin.today.dayNo, points: signin.today.points }))),
           (signin.days ?? []).length === 0
             ? null
             : h('div', { style: dayRowStyle },
@@ -1150,8 +1226,8 @@ interface StatusDocument {
             onChange: (event: { target: { value: string } }) => onChange(event.target.value),
           }, ...values.map(option => h('option', { key: option, value: option }, option)))
 
-        return h('div', { style: sectionBoxStyle, 'data-minimax-generation': true },
-          h('div', { style: sectionTitleStyle }, t('generateTitle')),
+        return h('div', { style: genCardStyle, 'data-minimax-generation': true },
+          h('div', { style: cardTitleStyle }, t('generateTitle')),
           h('div', { style: rowStyle },
             h('button', {
               type: 'button',
@@ -1245,39 +1321,77 @@ interface StatusDocument {
           )
         }
 
+        // The page's rows of hairline sections are gone: the card now reads as
+        // a two-column grid of soft sub-cards. Row one is the balance and the
+        // plan's windows, row two the check-in cycle and the next grants due,
+        // row three this host's own usage across both columns, row four the
+        // account's usage history across both.
+        const lots = [...(credits_!.upcoming ?? [])].sort((a, b) => a.expireAtMs - b.expireAtMs)
+        const windows = rateLimitRows(t, status?.rateLimit)
+        const profileLines = usageProfileRows(t, status?.usageProfile)
+        const updated = credits_!.updatedAtMs !== undefined
+          ? t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() })
+          : undefined
+        const loginLine = login?.state === 'signed-in'
+          ? (login.source === 'plugin' ? t('loginPlugin') : t('loginDesktop'))
+          : undefined
         return h('div', { style: pageStyle, 'data-minimax-page': true },
-        h('div', { style: cardStyle, 'data-minimax-credits-card': true },
-          h('div', { style: cardTitleStyle }, t('title')),
-          h('div', { style: bigNumberStyle }, t('balance', { total: credits(credits_!.total, 2) })),
-          row(t('free'), credits(credits_!.free, 3)),
-          row(t('purchased'), credits(credits_!.purchased, 3)),
-          expiryBlock(t, credits_),
-          rateLimitBlock(t, status?.rateLimit),
-          planNotice(t, status?.rateLimit),
-          signinBlock(t, signin, refresh),
-          h('div', { style: sectionTitleStyle }, t('lots')),
-          (credits_!.upcoming ?? []).length === 0
-            ? h('div', { style: mutedStyle }, t('noLots'))
-            : h('ul', { style: listStyle },
-              ...(credits_!.upcoming ?? []).map((lot, index) =>
-                h('li', { key: `${lot.expireAtMs}-${index}`, style: rowStyle },
-                  h('span', null, day(lot.expireAtMs)),
-                  h('span', null, credits(lot.amount, 2)),
-                ))),
-          usage !== undefined
-            ? h('div', { style: usageBoxStyle },
-              row(t('tokens', { count: tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens) }), ''),
-              row(t('cost', { amount: money(usage.estimatedCny) }), ''),
-              usage.requests > 0 ? row(t('requests', { count: usage.requests }), usage.lastModel ?? '') : null,
-            )
-            : null,
-          usageProfileBlock(t, status?.usageProfile),
-          loginBlock(t, login, refresh),
-          credits_!.updatedAtMs !== undefined
-            ? h('div', { style: mutedStyle }, t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() }))
-            : null,
-        ),
-        h(GenerationPanel, props),
+          h('div', { style: cardStyle, 'data-minimax-credits-card': true },
+            h('div', { style: cardHeadStyle },
+              h('span', { style: cardTitleStyle }, t('title')),
+              h('span', { style: mutedStyle },
+                [loginLine, updated].filter(line => line !== undefined).join(' · '))),
+            h('div', { style: gridStyle },
+              h('div', { style: boxStyle },
+                h('div', { style: boxTitleStyle }, t('creditsBox')),
+                h('div', { style: bigNumberStyle }, credits(credits_!.total, 2)),
+                row(t('free'), credits(credits_!.free, 3)),
+                row(t('purchased'), credits(credits_!.purchased, 3)),
+                ...expiryRows(t, credits_).slice(0, 1)),
+              h('div', { style: boxStyle, 'data-minimax-rate-limit': true },
+                h('div', { style: boxTitleStyle }, t('planTitle')),
+                ...(windows.length > 0
+                  ? [
+                      // The invisible number keeps the windows lined up with
+                      // the balance box's rows, which sit below its own big
+                      // number. With no windows to align, it is only noise.
+                      h('div', { style: { ...bigNumberStyle, visibility: 'hidden' as const }, 'aria-hidden': 'true' }, '—'),
+                      ...windows,
+                    ]
+                  : [rateLimitFallback(t, status?.rateLimit)])),
+              signinBlock(t, signin, refresh),
+              h('div', { style: boxStyle },
+                h('div', { style: boxTitleStyle }, t('lots')),
+                // The upstream already caps the list at the five soonest lots
+                // with credits left; the sort only keeps that promise honest.
+                ...(lots.length === 0
+                  ? [h('div', { style: mutedStyle }, t('noLots'))]
+                  : lots.map((lot, index) =>
+                    h('div', { key: `${lot.expireAtMs}-${index}`, style: rowStyle },
+                      h('span', null, day(lot.expireAtMs)),
+                      h('span', null, credits(lot.amount, 2)))))),
+              usage !== undefined
+                ? h('div', { style: { ...boxStyle, ...span2Style }, 'data-minimax-usage': true },
+                  h('div', { style: boxTitleStyle }, t('usageTitle')),
+                  row(t('usageTotal'), `${tokens(usage.inputTokens + usage.outputTokens + usage.cacheReadTokens)} tokens(≈¥${money(usage.estimatedCny)})`),
+                  usage.requests > 0 ? row(t('requests', { count: usage.requests }), usage.lastModel ?? '') : null,
+                )
+                : null,
+              profileLines.length > 0
+                ? h('div', { style: { ...boxStyle, ...span2Style }, 'data-minimax-usage-profile': true },
+                  h('div', { style: boxTitleStyle }, t('accountUsage')),
+                  h('div', { style: profileGridStyle },
+                    ...profileLines.map((line, index) => h('div', { key: `profile-${index}` }, line))))
+                : null,
+              login !== undefined && login.state !== 'signed-in'
+                ? h('div', { style: span2Style }, loginBlock(t, login, refresh))
+                : null,
+            ),
+          ),
+          // The generation panel does not need the balance: it spends the
+          // account's generation allowance, not its credits, so it stays
+          // usable even when the balance cannot be read.
+          h(GenerationPanel, props),
         )
       }
       const wrapStyle = {
@@ -1318,13 +1432,13 @@ interface StatusDocument {
         bottom: 'calc(100% + 6px)',
         left: 0,
         zIndex: 10,
-        minWidth: '240px',
-        borderRadius: '8px',
+        minWidth: '260px',
+        borderRadius: '14px',
         background: 'var(--dsh-panel-background, Canvas)',
         color: 'var(--dsh-panel-foreground, CanvasText)',
         border: '1px solid var(--dsh-panel-border, currentColor)',
         boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
-        padding: '8px 10px',
+        padding: '10px',
         fontSize: '12px',
         lineHeight: 1.6,
         textAlign: 'left' as const,
@@ -1334,19 +1448,51 @@ interface StatusDocument {
         justifyContent: 'space-between',
         gap: '16px',
       }
-      const expiryBoxStyle = {
-        marginTop: '6px',
-        paddingTop: '6px',
-        borderTop: '1px solid var(--dsh-panel-border, currentColor)',
-        opacity: 0.95,
+      // The rounded sub-card every section of the detail and the page card
+      // lives in. The fill is a translucent gray so one value works on both
+      // themes; the host's own muted token wins when it offers one.
+      const boxStyle = {
+        background: 'var(--dsh-muted, rgba(127, 127, 127, 0.1))',
+        borderRadius: '10px',
+        padding: '7px 10px',
+        display: 'flex',
+        flexDirection: 'column' as const,
+        gap: '4px',
       }
+      const boxTitleStyle = { fontWeight: 600, fontSize: '12px', opacity: 0.85 }
+      const detailFlowStyle = { display: 'flex', flexDirection: 'column' as const, gap: '6px' }
       const warnStyle = { color: 'var(--dsh-warning, #b45309)' }
       const cardStyle = {
         display: 'flex',
         flexDirection: 'column' as const,
-        gap: '6px',
+        gap: '8px',
         fontSize: '13px',
         lineHeight: 1.6,
+        background: 'var(--dsh-panel-background, Canvas)',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        borderRadius: '14px',
+        padding: '12px',
+      }
+      const cardHeadStyle = {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+        gap: '8px',
+        flexWrap: 'wrap' as const,
+      }
+      // The page card's two-column grid: credits beside the plan, the check-in
+      // beside the grants, and the wide rows spanning both columns below.
+      const gridStyle = {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: '8px',
+      }
+      const span2Style = { gridColumn: '1 / -1' }
+      // The account usage box lays its lines out two across.
+      const profileGridStyle = {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: '4px 16px',
       }
       // The page stacks the balance card and the generation panel.
       const pageStyle = {
@@ -1354,19 +1500,23 @@ interface StatusDocument {
         flexDirection: 'column' as const,
         gap: '10px',
       }
-      const cardTitleStyle = { fontWeight: 600 }
-      const bigNumberStyle = { fontSize: '20px', fontWeight: 600, marginBottom: '2px' }
-      const sectionTitleStyle = { marginTop: '8px', fontWeight: 600 }
-      const mutedStyle = { opacity: 0.7, fontSize: '12px' }
-      const listStyle = { listStyle: 'none', margin: 0, padding: 0 }
-      const sectionBoxStyle = {
-        marginTop: '10px',
-        paddingTop: '8px',
-        borderTop: '1px solid var(--dsh-panel-border, currentColor)',
+      // The generation panel wears the same rounded shell as the balance
+      // card, so the page reads as a stack of two cards rather than a card
+      // above a bare section.
+      const genCardStyle = {
         display: 'flex',
         flexDirection: 'column' as const,
-        gap: '6px',
+        gap: '8px',
+        fontSize: '13px',
+        lineHeight: 1.6,
+        background: 'var(--dsh-panel-background, Canvas)',
+        border: '1px solid var(--dsh-panel-border, currentColor)',
+        borderRadius: '14px',
+        padding: '12px',
       }
+      const cardTitleStyle = { fontWeight: 600 }
+      const bigNumberStyle = { fontSize: '20px', fontWeight: 600, marginBottom: '2px' }
+      const mutedStyle = { opacity: 0.7, fontSize: '12px' }
       const actionButtonStyle = {
         appearance: 'none' as const,
         background: 'transparent',
@@ -1395,12 +1545,6 @@ interface StatusDocument {
       }
       const dayTodayStyle = { opacity: 1, fontWeight: 600 }
       const dayClaimedStyle = { background: 'var(--dsh-panel-border, currentColor)', opacity: 0.9 }
-      const usageBoxStyle = {
-        marginTop: '8px',
-        paddingTop: '6px',
-        borderTop: '1px solid var(--dsh-panel-border, currentColor)',
-        opacity: 0.9,
-      }
 
       const tabActiveStyle = {
         appearance: 'none',

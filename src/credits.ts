@@ -804,7 +804,7 @@ export async function fetchTokenPlanWindows(
 }
 
 /** How many days of expiry the plugin calls "about to expire". */
-export const EXPIRING_WINDOW_DAYS = 7
+export const EXPIRING_WINDOW_DAYS = 3
 
 /** How many days it looks ahead for the wider bucket. */
 export const EXPIRING_HORIZON_DAYS = 30
