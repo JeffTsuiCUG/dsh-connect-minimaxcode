@@ -405,3 +405,167 @@ describe('the image dock', () => {
     expect(tree).toContain('generateNoSession')
   })
 })
+
+/**
+ * A session face that reads `this` the way the host's own session does.
+ *
+ * The host's `Session.prompt` reaches the gateway through `this.remote`, so a
+ * call that loses its receiver cannot work. The face below therefore reads
+ * `this.remote` exactly as the host does — which is what makes it able to
+ * catch a dock that takes the method off the session and calls it unbound.
+ */
+function boundSessionFace(sent: unknown[][]) {
+  const remote = {
+    session: {
+      prompt: async (
+        request: { requestId?: string; content: unknown[]; mode: string },
+      ) => {
+        sent.push([request.content, request.mode, request.requestId])
+        return { accepted: true }
+      },
+    },
+  }
+  const session = {
+    remote,
+    async prompt(
+      content: unknown[],
+      mode: string,
+      _signal?: AbortSignal,
+      requestId?: string,
+    ) {
+      // Reading `this.remote` is the point: an unbound call throws here.
+      const result = await this.remote.session.prompt({
+        requestId,
+        content,
+        mode,
+      })
+      return { ok: true, value: result }
+    },
+    beginSubmission(input: { mode: string; text: string }) {
+      submissions.push(input)
+      return { requestId: `req-${submissions.length}` }
+    },
+  }
+  const submissions: { mode: string; text: string }[] = []
+  return {
+    submissions,
+    face: {
+      binding: () => ({ session }),
+    },
+  }
+}
+
+describe('the image dock sends through the session it was given', () => {
+  it('calls prompt with the session as its receiver', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    const sent: unknown[][] = []
+    const { face } = boundSessionFace(sent)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      sessions: face,
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({
+      target: { value: '一只橘猫' },
+    })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // The picture reached the conversation, which means the call kept its
+    // receiver: the host's session reads `this.remote` to send it.
+    expect(sent).toHaveLength(1)
+    const [content, mode] = sent[0]!
+    expect(mode).toBe('queue')
+    const parts = content as { type: string }[]
+    expect(parts[0]?.type).toBe('image')
+    expect(parts[1]?.type).toBe('text')
+  })
+
+  it('registers a submission echo and sends the identity it minted', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    const sent: unknown[][] = []
+    const { face, submissions } = boundSessionFace(sent)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      sessions: face,
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({
+      target: { value: '一只橘猫' },
+    })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // The host shows the sent picture as this turn's message only when the
+    // prompt carries the identity that `beginSubmission` minted.
+    expect(submissions).toHaveLength(1)
+    expect(submissions[0]?.mode).toBe('queue')
+    expect(submissions[0]?.text).toBe('一只橘猫')
+    const [, , requestId] = sent[0]!
+    expect(requestId).toBe('req-1')
+  })
+
+  it('says the picture did not arrive when the host refuses the prompt', async () => {
+    const loaded = loadClient()
+    const harness = reactHarness()
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: Slot['options'], component: (props: unknown) => unknown) => {
+          loaded.slots.push({ options, component })
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      sessions: {
+        binding: () => ({
+          session: {
+            prompt: async () => ({ ok: false }),
+          },
+        }),
+      },
+      effect: (effect: () => unknown) => effect(),
+    })
+    const dock = dockOf(loaded)
+    const props = { ...dock.options.inject?.('session-1'), t: (key: string) => key }
+
+    clickables(renderDeep(harness, dock.component, props))[0]!.props.onClick!()
+    fields(renderDeep(harness, dock.component, props))[0]!.props.onChange!({
+      target: { value: '一只橘猫' },
+    })
+    runButton(renderDeep(harness, dock.component, props))!.props.onClick!()
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    // A refused prompt resolves with `{ ok: false }` rather than throwing, so
+    // the dock has to read the outcome instead of assuming it worked.
+    const tree = JSON.stringify(harness.render(dock.component, props))
+    expect(tree).toContain('generateSendFailed')
+  })
+})

@@ -395,6 +395,31 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 ## 更新记录
 
+### 0.6.8（2026-11-13）
+
+- **修复「无法发送到对话」：会话方法没有绑定 `this`**。这一版之前，输入框里的「生成图片」**必然**失败，提示「无法发送到对话，请到插件页生成后下载」。原因在插件把 `session.prompt` 从会话对象上摘下来之后，以独立函数的方式调用：
+
+  ```ts
+  const send = binding?.session?.prompt
+  return typeof send === 'function' ? { prompt: send } : undefined
+  ```
+
+  宿主自己的 `Session.prompt` 是**通过 `this.remote` 走到网关**的：
+
+  ```ts
+  result = await this.remote.session.prompt({ ... })
+  ```
+
+  方法一旦被摘下来，`this` 就不再指向会话，而是指向外面那个 `{ prompt: send }` 包装对象，于是 `this.remote` 是 `undefined`，调用抛出 `undefined is not an object (evaluating 'this.remote.session')`。现在方法被绑回会话对象（`beginSubmission` 同理），图片就能真正发出去了。
+
+  顺带一提：同一个文件里的草稿通道**一直**写着 `create.bind(conversation)`，只是发送通道漏了 —— 而发送通道优先，草稿通道根本走不到，所以那个正确的绑定救不了场。
+
+- **发图现在会出现在对话里**。此前插件自己编了一个 `requestId`（`minimax-h3-${Date.now()}`）交给 `prompt()`：模型能收到图片，但**对话里不显示这条消息** —— 宿主要求先用 `beginSubmission()` 注册一次本地回执、再用它给出的身份发送。现在照宿主输入框的做法走，图片作为这一轮消息的一部分出现。
+
+- **不再把失败当成功**。`prompt()` 被拒绝时返回的是 `{ ok: false }` 而不是抛异常，插件此前会把它当成功、把提示条清空，于是屏幕上什么都不剩。现在会读出结果，拒绝时如实说「无法发送到对话」。
+
+- **新增回归测试（3 个用例）**。此前 `tests/generate-dock.spec.ts` 的 mock 是个**不读 `this`** 的箭头函数，因此方法有没有绑定根本测不出来 —— 真实宿主要读 `this.remote`，差别正在于此。这次的新用例让 mock 像宿主一样读 `this.remote`，三条断言分别钉住：调用带着会话当接收者、发送的是 `beginSubmission` 给出的身份、宿主拒绝时如实提示。**把这三条用例里的修复撤掉，它们会立刻失败。**
+
 ### 0.6.7（2026-11-12）
 
 - **并入 PR [#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)（作者 [azsora](https://github.com/azsora)）**：

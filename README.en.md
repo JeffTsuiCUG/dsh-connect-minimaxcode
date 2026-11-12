@@ -384,6 +384,31 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.8 (2026-11-13)
+
+- **Fixed "Could not send it to the conversation": the session method was never bound.** Before this release the composer's **Generate an image** entry failed *every* time, reporting "Could not send it to the conversation; generate on the plugin page and download it instead." The plugin took `session.prompt` off the session object and then called it as a standalone function:
+
+  ```ts
+  const send = binding?.session?.prompt
+  return typeof send === 'function' ? { prompt: send } : undefined
+  ```
+
+  The host's own `Session.prompt` reaches the gateway **through `this.remote`**:
+
+  ```ts
+  result = await this.remote.session.prompt({ ... })
+  ```
+
+  Once the method is taken off the object, `this` no longer points at the session but at the `{ prompt: send }` wrapper, so `this.remote` is `undefined` and the call throws `undefined is not an object (evaluating 'this.remote.session')`. The method is now bound back to its session (`beginSubmission` for the same reason), and the picture actually goes out.
+
+  Worth noting: the draft channel in the same file has always written `create.bind(conversation)` — only the send path missed it. And because the send path is tried first, the draft path never runs, so that correct binding could not rescue it.
+
+- **A sent picture now shows up in the conversation.** The plugin used to invent its own `requestId` (`minimax-h3-${Date.now()}`) and hand it to `prompt()`: the model received the picture, but the **conversation showed no such message** — the host wants a local submission echo registered with `beginSubmission()` first, and the prompt to carry the identity that registration mints. The dock now does what the host's own composer does, and the picture arrives as part of that turn.
+
+- **A refusal is no longer read as a success.** A refused prompt resolves with `{ ok: false }` rather than throwing, and the plugin used to treat that as success and clear the note, leaving nothing on screen. The outcome is now read, and a refusal says so.
+
+- **Three new regression cases.** The mock in `tests/generate-dock.spec.ts` used to be an **arrow function that never reads `this`**, so whether the method was bound could not be observed — while the real host reads `this.remote`, and that is exactly the difference. The new cases make the mock read `this.remote` the way the host does, and pin three things: the call keeps the session as its receiver, the prompt carries the identity `beginSubmission` minted, and a refusal is reported. **Revert the fix and they fail at once.**
+
 ### 0.6.7 (2026-11-12)
 
 - **Merged PR [#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5) by [azsora](https://github.com/azsora)**:
