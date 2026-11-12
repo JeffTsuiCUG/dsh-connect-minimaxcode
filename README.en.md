@@ -384,6 +384,10 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.6 (2026-11-12)
+
+- **The README gained a "Feedback and contributions" section**: an email address (1628451685@qq.com), issues and pull requests, and a note that reports from **free accounts** are the ones most wanted — a subscribed account can read the limit windows and the plan tier, so some problems only show up on a free account and I may not be able to reproduce them here. It also lists what is worth including in a report, and invites a PR for anyone who fixes it themselves.
+
 ### 0.6.5 (2026-11-12)
 
 - **Fixed "the limit windows never showed up"**: once a plan is held, the upstream changed the quota endpoint's **field names and its meaning** — from the share *used* (the string `"19%"`) to the share *remaining* (the number `90`). The plugin still read the old names, so the windows either could not be read at all or read as the opposite. Both shapes are accepted now, and what leaves the plugin is always the share *used*: 92% remaining is 8% used. The window length is still derived from the answer's own edges (measured: five hours and seven days) rather than assumed.
@@ -602,6 +606,27 @@ Connects Qoder through a personal access token (PAT), with independent configura
 ```bash
 dsh plugin --profile desktop add dsh-qoder-connect
 ```
+
+## Feedback and contributions
+
+If something does not work, or is awkward to use, please reach me in whichever way suits you — **I read all of them**:
+
+- **Email**: <1628451685@qq.com>
+- **Open an issue**: <https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues>
+- **Fix it and send a PR**: <https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pulls>
+
+**Reports from free accounts are the ones I most want.**
+
+A subscribed account can read more of the upstream (the limit windows, the plan tier and its expiry), so some problems only ever show up on a **free** account and I may not be able to reproduce them here — and the same is true in the other direction. If the free version fails to **connect**, reads nothing, or behaves differently than you expect, that is exactly the half I cannot see on my own, and hearing about it helps far more than a reproduction from a subscribed account.
+
+When you report something, these save a round trip:
+
+- the DSH version and the plugin version
+- the full error text (not just "it failed")
+- what you did to get there, and what the plugin page showed
+- if it is about your account, the status the plugin page reported
+
+Fixing it yourself is even better — just open the PR. The format does not matter much; a commit message and a comment that say what changed and why is enough.
 
 ## Contributors
 
