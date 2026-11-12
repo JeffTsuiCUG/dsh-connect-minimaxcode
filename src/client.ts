@@ -230,7 +230,7 @@ interface StatusDocument {
     expiringAmount: '{amount} 积分',
     nextExpiry: '最近到期日',
     creditsBox: '积分',
-    planTitle: 'Plan 额度',
+    planTitle: 'Plan',
     usageTitle: '本机用量',
     usageTotal: '累计',
     lots: '到期批次',
@@ -316,7 +316,7 @@ interface StatusDocument {
     expiringAmount: '{amount} credits',
     nextExpiry: 'Next expiry',
     creditsBox: 'Credits',
-    planTitle: 'Plan allowance',
+    planTitle: 'Plan',
     usageTitle: 'Local usage',
     usageTotal: 'Total',
     lots: 'Expiring grants',
@@ -628,6 +628,11 @@ interface StatusDocument {
        * it nothing: the rolling windows it does not have are already
        * explained by the notice beside them. What this adds is for the
        * accounts that do hold one — the tier's name and the day it ends.
+       *
+       * It heads the plan box rather than standing on its own below it: the
+       * tier is the plan's headline fact, so it wears the balance's own big
+       * number size. The day it ends is a detail beside the tier, and keeps
+       * the row size.
        */
       function planLine(t: (key: string, params?: Record<string, unknown>) => string, plan?: StatusDocument['plan']): unknown {
         if (plan === undefined || !plan.active) return null
@@ -635,9 +640,9 @@ interface StatusDocument {
         const expiry = plan.expiresAtMs === undefined
           ? null
           : t('planExpires', { date: day(plan.expiresAtMs) })
-        return h('div', { style: rowStyle, 'data-minimax-plan': true },
+        return h('div', { style: planHeadStyle, 'data-minimax-plan': true },
           h('span', null, tier),
-          h('span', null, expiry ?? ''),
+          h('span', { style: planExpiryStyle }, expiry ?? ''),
         )
       }
 
@@ -1357,6 +1362,9 @@ interface StatusDocument {
         // account's usage history across both.
         const lots = [...(credits_!.upcoming ?? [])].sort((a, b) => a.expireAtMs - b.expireAtMs)
         const windows = rateLimitRows(t, status?.rateLimit)
+        // The tier and the day it ends, for an account that holds one. It
+        // heads the plan box rather than standing on its own below it.
+        const planHead = planLine(t, status?.plan)
         const profileLines = usageProfileRows(t, status?.usageProfile)
         const updated = credits_!.updatedAtMs !== undefined
           ? t('updated', { time: new Date(credits_!.updatedAtMs).toLocaleTimeString() })
@@ -1379,18 +1387,18 @@ interface StatusDocument {
                 ...expiryRows(t, credits_).slice(0, 1)),
               h('div', { style: boxStyle, 'data-minimax-rate-limit': true },
                 h('div', { style: boxTitleStyle }, t('planTitle')),
+                // The tier heads the box, wearing the balance's own big number
+                // size. An account without a plan has no headline to show, and
+                // the invisible number keeps the windows lined up with the
+                // balance box's rows instead.
+                ...(planHead !== null
+                  ? [planHead]
+                  : windows.length > 0
+                    ? [h('div', { style: { ...bigNumberStyle, visibility: 'hidden' as const }, 'aria-hidden': 'true' }, '—')]
+                    : []),
                 ...(windows.length > 0
-                  ? [
-                      // The invisible number keeps the windows lined up with
-                      // the balance box's rows, which sit below its own big
-                      // number. With no windows to align, it is only noise.
-                      h('div', { style: { ...bigNumberStyle, visibility: 'hidden' as const }, 'aria-hidden': 'true' }, '—'),
-                      ...windows,
-                    ]
+                  ? windows
                   : [rateLimitFallback(t, status?.rateLimit)])),
-              // The tier and the day it ends, for an account that holds one.
-              // An account without a plan has nothing to say here.
-              planLine(t, status?.plan),
               signinBlock(t, signin, refresh),
               h('div', { style: boxStyle },
                 h('div', { style: boxTitleStyle }, t('lots')),
@@ -1548,6 +1556,17 @@ interface StatusDocument {
       }
       const cardTitleStyle = { fontWeight: 600 }
       const bigNumberStyle = { fontSize: '20px', fontWeight: 600, marginBottom: '2px' }
+      // The plan's headline line: the tier wears the balance's own big number
+      // size, so the two boxes' headline lines are the same height, and the
+      // day it ends stays at the row size beside it.
+      const planHeadStyle = {
+        ...bigNumberStyle,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'baseline',
+        gap: '16px',
+      }
+      const planExpiryStyle = { fontSize: '13px', fontWeight: 400, lineHeight: '1.6' }
       const mutedStyle = { opacity: 0.7, fontSize: '12px' }
       const actionButtonStyle = {
         appearance: 'none' as const,
