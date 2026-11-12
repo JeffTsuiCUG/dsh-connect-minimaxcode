@@ -384,6 +384,15 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 
 ## Changelog
 
+### 0.6.7 (2026-11-12)
+
+- **Merged PR [#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5) by [azsora](https://github.com/azsora)**:
+  - **The remaining percent the documented quota endpoint sends is read too**. Once a plan is held, the upstream renamed the window field from the share *used* (`"19%"`) to the share *remaining* (`90`); 0.6.5 already reads both shapes. This PR closes the other gap — when the documented endpoint answers **200 but carries a shape that cannot be read**, the older path is tried too, not only when the request throws.
+  - **The surfaces are reworked**: the pill detail and the plugin page card are now rounded sub-cards (balance, limit windows, check-in and expiring grants each in their own), and the generation panel wears the same shell.
+  - **Why there are no windows is now named**: instead of one "unavailable", each state is told apart — **not signed in / the sign-in expired / no subscription / the read failed** — and a failed read shows the upstream's own words. That is the part a free account needs most.
+  - **"Expiring soon" now covers three days**, and the count and the wording agree (the upstream's lots expire day by day over thirty-odd days; the window is a display choice, not an upstream fact).
+- Together with the window fix in 0.6.5, a subscribed account now sees both its five-hour window and its weekly window read correctly.
+
 ### 0.6.6 (2026-11-12)
 
 - **The README gained a "Feedback and contributions" section**: an email address (1628451685@qq.com), issues and pull requests, and a note that reports from **free accounts** are the ones most wanted — a subscribed account can read the limit windows and the plan tier, so some problems only show up on a free account and I may not be able to reproduce them here. It also lists what is worth including in a report, and invites a PR for anyone who fixes it themselves.
@@ -633,6 +642,7 @@ Fixing it yourself is even better — just open the PR. The format does not matt
 - **[eghrhegpe](https://github.com/eghrhegpe)** — raised the request for a plugin-page icon and Chinese/English copy ([#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)). It became 0.5.2: the plugin page has its own SVG artwork, the title and the introduction come in both languages, and the interface follows the host's language.
 - **[azsora](https://github.com/azsora)** — found the plan's rate-limit endpoint in the desktop app's own traffic and wired the 5-hour and weekly usage windows into the credit pill and the plugin page ([#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)): the window length is derived from the response's own edges rather than hard-coded. It became 0.5.5.
 - **[qzz19970504](https://github.com/qzz19970504)** — found and fixed the wiring gap that made every image upload fail ([#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)): the catalog declared the `image` modality, but the adapter never connected the host's durable attachment service, so pi-ai refused image requests before they were sent. The fix became 0.5.3.
+- **[azsora](https://github.com/azsora)** — found that the official quota endpoint renamed its window field and inverted its meaning (the share used became the share remaining), closed the gap where a 200 with an unreadable shape never reached the older path, and reworked the pill detail and the page card into rounded sub-cards that say why there are no windows ([#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)). It became 0.6.7.
 - Plugin author: **[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## Acknowledgements
