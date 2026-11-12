@@ -535,13 +535,13 @@ export function parseRateLimitWindows(document: unknown): RateLimitWindows | und
   if (typeof entry !== 'object' || entry === null) return undefined
   const record = entry as Record<string, unknown>
   const interval = readWindow(
-    record.current_interval_used_percent,
+    usedPercentFrom(record.current_interval_used_percent, record.current_interval_remaining_percent),
     record.start_time,
     record.end_time,
     record.current_interval_status,
   )
   const weekly = readWindow(
-    record.current_weekly_used_percent,
+    usedPercentFrom(record.current_weekly_used_percent, record.current_weekly_remaining_percent),
     record.weekly_start_time,
     record.weekly_end_time,
     record.current_weekly_status,
@@ -556,6 +556,22 @@ export function parseRateLimitWindows(document: unknown): RateLimitWindows | und
  * The desktop app reads it the same way: `isUnlimited: 3 === status`.
  */
 const UNLIMITED_STATUS = 3
+
+/**
+ * The used share of a window, from either shape the upstream sends.
+ *
+ * The older path reports how much of the allowance went ("3%"); the documented
+ * quota endpoint reports how much is left (96). Both describe the same window,
+ * so a response that only carries the remaining share is turned into the used
+ * one rather than treated as unreadable — the documented endpoint sends no
+ * used field at all, which is what left the plan's windows off the card.
+ */
+function usedPercentFrom(used: unknown, remaining: unknown): number | undefined {
+  const direct = parsePercent(used)
+  if (direct !== undefined) return direct
+  const rest = parsePercent(remaining)
+  return rest === undefined ? undefined : 100 - rest
+}
 
 /** Assemble one window from its percent and edge fields; all must be present. */
 function readWindow(
@@ -1039,7 +1055,14 @@ export class MinimaxCredits {
     this.#apiKey = apiKey
     if (apiKey !== undefined) {
       try {
-        return await fetchTokenPlanWindows(apiKey, region, fetchImpl)
+        const read = await fetchTokenPlanWindows(apiKey, region, fetchImpl)
+        // "No subscription" is the documented path's own plain answer and is
+        // not worth a second request; a shape it failed to read is. The older
+        // path still might carry windows the documented one did not.
+        if (read.error === undefined || read.absence !== undefined) return read
+        const legacy = await fetchRateLimitWindows(credential, region, fetchImpl)
+        if (legacy !== undefined) return { windows: legacy }
+        return read
       } catch (error) {
         // The documented path could not answer. The older one still might.
         const legacy = await fetchRateLimitWindows(credential, region, fetchImpl)
