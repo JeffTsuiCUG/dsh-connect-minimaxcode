@@ -95,7 +95,9 @@ The plugin is not useless on an older host; it gives up one thing at a time. Tha
 
 A host that does not know a manifest field ignores it (the manifest is not validated strictly), so an old host does not refuse the plugin over `cordis.patch` — it merely has no effect.
 
-> This table was **read out of the published history of every host package on npm**, version by version — not estimated. The method is written down in the repository: pull each host package at each version and look for the API in the source it shipped.
+> This table was **read out of the published history of every host package on npm**, version by version — not estimated.
+>
+> **And it does not stop at an inference**: this repository's lockfile resolves the host packages to `0.1.6-alpha.2`, so every release compiles, builds and runs the whole suite **against that oldest host** — the floor is verified on every release, not concluded once. The method is written down in the repository: pull each host package at each version and look for the API in the source it shipped.
 ## Installation
 
 **Option 1: install from the Git repository** (recommended, gets the latest code)
@@ -425,7 +427,7 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The host publishes its own packages under the same version numbers as the desktop** (DSH `0.2.2-rc.1` ships `0.2.2-rc.1` packages), so "which release first had this API" can be answered straight from npm — every row of the compatibility table was read out of the source that host package version actually shipped.
 - **Two things set the real floor**: the `plugins.bundle.config` slot the plugin page lives in, and the `cordis.patch` manifest patch that offers the provider in the model picker. Both begin at `0.1.6-alpha.2`. Older hosts only have the plugin manager's own `settings.plugin.item` — a card inside the settings section, on a keyed slot — which is not a plugin page.
 - **Older hosts are not useless, they give up one thing at a time** (the README has the full table): from `0.1.3-alpha.2` the models, the credit pill, the generate entry in the composer and a picture reaching the conversation all work, only the plugin page is missing; from `0.1.2-alpha.2` a picture reaches the conversation too, only the draft channel is missing. A host that does not know a manifest field ignores it (the manifest is not validated strictly), so an old host does not refuse the plugin over `cordis.patch` — it merely has no effect.
-- The peer dependency floors for the host packages moved to `>=0.1.6-alpha.2` as well, so an older host's own versions satisfy the range.
+- The peer dependency floors for the host packages moved to `>=0.1.6-alpha.2` as well, so an older host's own versions satisfy the range. **The lockfile resolves to `0.1.6-alpha.2`** — so every release compiles, builds and runs the whole suite against that oldest host, and the floor is verified on every release.
 - The README gained a "Compatibility: the oldest DSH this works on" section (in both languages), with the evidence table and the degradation ladder.
 
 ### 0.6.8 (2026-11-13)
