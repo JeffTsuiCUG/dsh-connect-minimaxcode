@@ -57,10 +57,45 @@ Either:
 1. **The MiniMax Code desktop app (China region) installed and signed in** — the plugin reuses its sign-in (the easy way)
 2. **Nothing installed** — press "Sign in to MiniMax Code" on the plugin page; the plugin starts an OAuth device code flow and you confirm with your own MiniMax account in a browser (this needs `account.minimax.cn` to be reachable)
 
-Plus DSH desktop (built-in core `>=0.2.1-rc.2 <0.3.0`, see `engines.dsh` in `package.json`; tested on `0.2.1-rc.2`) or the Web profile.
+Plus DSH desktop (built-in core `>=0.1.6-alpha.2 <0.3.0`, see `engines.dsh` in `package.json`; tested on `0.2.2-rc.1`) or the Web profile.
 
 > **Sending a picture needs the host's attachment service**: the plugin does not read images itself — the host's durable attachment service turns a stored reference into request bytes, and the plugin only connects the two. On a host without that service the plugin still loads and text still works; only image requests are refused (`pi-ai image input requires the durable attachment service`).
 
+## Compatibility: the oldest DSH this works on
+
+**The oldest supported DSH is `0.1.6-alpha.2`** — that is the range in `engines.dsh`. The plugin used to declare `0.2.1-rc.2`, which was a conservative floor rather than a technical one; this time the host packages' published history was searched, and the floor moved down to the version where each feature actually exists.
+
+The host publishes its own packages under **the same version numbers as the desktop** (DSH `0.2.2-rc.1` ships `0.2.2-rc.1` packages), so "which release first had this API" can be answered straight from npm. Every row below was read out of that version's published source:
+
+| Host capability | First version | What the plugin uses it for |
+| --- | --- | --- |
+| `llm.registerAdapter` | `0.0.1-rc.1` | registering the MiniMax Code provider |
+| `webServer.register` (`kind: 'exact'`) | `0.0.1-rc.1` | the status, action, generation and capability routes |
+| `attachments.saveImage` | `0.0.1-rc.1` | storing a generated picture as an attachment |
+| client `slots` / `sessions` services | `0.0.1-rc.3` | the credit pill and the composer tool row |
+| `conversation.input.left` slot | `0.0.1-rc.1` | where the pill and the generate entry sit |
+| `dsh.client.inject` / `immediately` | `0.0.1-rc.1` | loading the client half |
+| `session.beginSubmission` / `binding()` / `scope()` | `0.1.2-alpha.2` | the picture going out **and showing up in the conversation** |
+| `inputActions.addAttachments` / `conversation.createDrafts` | `0.1.3-alpha.2` | the picture going into the input box (the draft channel) |
+| **`plugins.bundle.config` slot** | **`0.1.6-alpha.2`** | **the plugin page (generation panel, check-in switch, the full bill)** |
+| **`cordis.patch` manifest patch** | **`0.1.6-alpha.2`** | **offering the provider in the model picker without changing the default** |
+
+**The last two rows are the real floor.** The plugin page and the manifest patch both begin at `0.1.6-alpha.2`; older hosts only have the plugin manager's own `settings.plugin.item` — a card inside the settings section, on a keyed slot — which is not a plugin page.
+
+### What an older host still gets
+
+The plugin is not useless on an older host; it gives up one thing at a time. That is also why the floor sits at `0.1.6-alpha.2` rather than lower: **the plugin page is the plugin's main surface** (the H3 generation panel, the check-in switch and the detailed balance all live there), and claiming support while it is missing would be a lie.
+
+| Host version | What still works | What is missing |
+| --- | --- | --- |
+| `>= 0.1.6-alpha.2` | everything | —— |
+| `0.1.3-alpha.2` – `0.1.6-alpha.1` | the models, the credit pill, the generate entry in the composer, a picture reaching the conversation | no plugin page (the generation panel and the check-in switch live there); the manifest patch has no effect, so the model must be picked by hand |
+| `0.1.2-alpha.2` – `0.1.3-alpha.1` | less again: the picture can still be sent straight through the session | no draft channel (`createDrafts` / `addAttachments` did not exist yet) |
+| `< 0.1.2-alpha.2` | the text models and the credit display | a picture reaches the model but **does not show in the conversation** (no local echo, `beginSubmission`) |
+
+A host that does not know a manifest field ignores it (the manifest is not validated strictly), so an old host does not refuse the plugin over `cordis.patch` — it merely has no effect.
+
+> This table was **read out of the published history of every host package on npm**, version by version — not estimated. The method is written down in the repository: pull each host package at each version and look for the API in the source it shipped.
 ## Installation
 
 **Option 1: install from the Git repository** (recommended, gets the latest code)
@@ -383,6 +418,15 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
 ## Changelog
+
+### 0.6.9 (2026-11-13)
+
+- **The oldest supported DSH moved from `0.2.1-rc.2` down to `0.1.6-alpha.2`.** The old floor was a conservative value, not a technical one. This release searched the host packages' published history version by version and, for every host capability the plugin uses, found the release it first appeared in.
+- **The host publishes its own packages under the same version numbers as the desktop** (DSH `0.2.2-rc.1` ships `0.2.2-rc.1` packages), so "which release first had this API" can be answered straight from npm — every row of the compatibility table was read out of the source that host package version actually shipped.
+- **Two things set the real floor**: the `plugins.bundle.config` slot the plugin page lives in, and the `cordis.patch` manifest patch that offers the provider in the model picker. Both begin at `0.1.6-alpha.2`. Older hosts only have the plugin manager's own `settings.plugin.item` — a card inside the settings section, on a keyed slot — which is not a plugin page.
+- **Older hosts are not useless, they give up one thing at a time** (the README has the full table): from `0.1.3-alpha.2` the models, the credit pill, the generate entry in the composer and a picture reaching the conversation all work, only the plugin page is missing; from `0.1.2-alpha.2` a picture reaches the conversation too, only the draft channel is missing. A host that does not know a manifest field ignores it (the manifest is not validated strictly), so an old host does not refuse the plugin over `cordis.patch` — it merely has no effect.
+- The peer dependency floors for the host packages moved to `>=0.1.6-alpha.2` as well, so an older host's own versions satisfy the range.
+- The README gained a "Compatibility: the oldest DSH this works on" section (in both languages), with the evidence table and the degradation ladder.
 
 ### 0.6.8 (2026-11-13)
 
