@@ -117,15 +117,30 @@ export interface VideoGenerationResult {
   totalTokens?: number
 }
 
+import { classifyFailure, type FailureVerdict } from './failure.ts'
+
 /** A generation call that the upstream refused, with the reason it gave. */
 export class GenerationError extends Error {
   /** The upstream's own status code, when it gave one. */
   readonly code: number | undefined
+  /**
+   * What kind of failure this is, and what it cost.
+   *
+   * The verdict is what a caller acts on: it says whether the remedy is to
+   * change something, to sign in again, or to wait, and whether the work may
+   * already have been charged for.
+   */
+  readonly verdict: FailureVerdict
 
-  constructor(message: string, code?: number) {
+  constructor(message: string, code?: number, verdict?: Partial<FailureVerdict>) {
     super(message)
     this.name = 'GenerationError'
     this.code = code
+    this.verdict = {
+      kind: verdict?.kind ?? classifyFailure(message, code),
+      charged: verdict?.charged ?? false,
+      upstream: verdict?.upstream ?? (code === undefined ? undefined : { status: code, code, message }),
+    }
   }
 }
 
@@ -231,17 +246,34 @@ async function callGeneration(
   try {
     document = JSON.parse(text)
   } catch {
-    if (!response.ok) throw new GenerationError(`generation request failed: HTTP ${response.status}`, response.status)
-    throw new GenerationError('generation response was not JSON')
+    if (!response.ok) {
+      throw new GenerationError(`generation request failed: HTTP ${response.status}`, response.status, {
+        charged: false,
+        upstream: { status: response.status, message: `generation request failed: HTTP ${response.status}` },
+      })
+    }
+    // The response was not JSON, so nothing was produced and nothing was spent.
+    throw new GenerationError('generation response was not JSON', undefined, { charged: false })
   }
   if (!response.ok) {
-    throw new GenerationError(
-      readErrorMessage(document) ?? `generation request failed: HTTP ${response.status}`,
-      readErrorCode(document) ?? response.status,
-    )
+    const message = readErrorMessage(document) ?? `generation request failed: HTTP ${response.status}`
+    const code = readErrorCode(document)
+    throw new GenerationError(message, code ?? response.status, {
+      kind: classifyFailure(message, response.status),
+      // The upstream refused, so it produced nothing and spent nothing.
+      charged: false,
+      upstream: { status: response.status, code, message },
+    })
   }
   const refusal = readBodyRefusal(document)
-  if (refusal !== undefined) throw new GenerationError(refusal.message, refusal.code)
+  if (refusal !== undefined) {
+    throw new GenerationError(refusal.message, refusal.code, {
+      kind: classifyFailure(refusal.message, response.status),
+      // A refusal is not a production: nothing was produced, nothing spent.
+      charged: false,
+      upstream: { status: response.status, code: refusal.code, message: refusal.message },
+    })
+  }
   return (document ?? {}) as Record<string, unknown>
 }
 
@@ -389,16 +421,32 @@ export async function queryVideoTask(
   try {
     document = (JSON.parse(text) ?? {}) as Record<string, unknown>
   } catch {
-    throw new GenerationError(`video task query failed: HTTP ${response.status}`, response.status)
+    throw new GenerationError(`video task query failed: HTTP ${response.status}`, response.status, {
+      // The task was already submitted, so the upstream may have charged for
+      // it before this query failed.
+      charged: true,
+      upstream: { status: response.status, message: `video task query failed: HTTP ${response.status}` },
+    })
   }
   if (!response.ok) {
-    throw new GenerationError(
-      readErrorMessage(document) ?? `video task query failed: HTTP ${response.status}`,
-      readErrorCode(document) ?? response.status,
-    )
+    const message = readErrorMessage(document) ?? `video task query failed: HTTP ${response.status}`
+    const code = readErrorCode(document)
+    throw new GenerationError(message, code ?? response.status, {
+      kind: classifyFailure(message, response.status),
+      charged: true,
+      upstream: { status: response.status, code, message },
+    })
   }
   const refusal = readBodyRefusal(document)
-  if (refusal !== undefined) throw new GenerationError(refusal.message, refusal.code)
+  if (refusal !== undefined) {
+    throw new GenerationError(refusal.message, refusal.code, {
+      kind: classifyFailure(refusal.message, response.status),
+      // The task was already submitted; a refusal here is about reading it
+      // back, not about whether the work was accepted.
+      charged: true,
+      upstream: { status: response.status, code: refusal.code, message: refusal.message },
+    })
+  }
 
   // The task's own shape, measured against the live endpoint:
   // { task: { id, model, status, content: { url }, resolution, duration,

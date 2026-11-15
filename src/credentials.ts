@@ -77,6 +77,15 @@ export interface PluginState {
   schemaVersion: number
   /** Whether the plugin claims the daily grant on its own. */
   autoCheckin: boolean
+  /**
+   * Whether the balance shows in the composer.
+   *
+   * A display choice rather than a setting about the account: it changes
+   * nothing upstream and nothing about what the plugin does, only whether
+   * the balance is drawn beside the composer. It therefore takes effect at
+   * once, with no draft to save — see the note on the settings below.
+   */
+  showPill?: boolean
   /** The day the last claim happened, in the account's time zone. */
   lastClaimDay?: string
   /** When the last claim happened, in milliseconds since the epoch. */

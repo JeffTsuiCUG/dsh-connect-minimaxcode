@@ -9,6 +9,8 @@
  * @module dsh-connect-minimaxcode
  */
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: it brings in the `attachments` Context augmentation, which is
 // what makes `ctx.get('attachments')` a typed read.
@@ -27,12 +29,14 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
-import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type PlanStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
+import { cooldownFor } from './failure.ts'
+import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type DiagnosticsStatus, type PlanStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import {
   GenerationError,
   IMAGE_AREAS,
   IMAGE_ASPECT_RATIOS,
   IMAGE_MODELS,
+  MINIMAX_API_HOSTS,
   VIDEO_DURATIONS,
   VIDEO_RATIOS,
   VIDEO_RESOLUTIONS,
@@ -42,7 +46,8 @@ import {
   queryVideoTask,
   startVideoTask,
 } from './generation.ts'
-import { MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
+import { MINIMAX_ACCOUNT_HOSTS, MinimaxCredits, ensureOAuthCredential, type OAuthCredential, type OAuthState } from './credits.ts'
+import { MINIMAX_GATEWAYS } from './auth.ts'
 import {
   credentialNeedsRefresh,
   deletePluginCredential,
@@ -247,6 +252,13 @@ function apply(ctx: Context) {
   let revokedByServer = false
   /** What the card last reported about what the host offered it. */
   let capability: { at: number; findings: Record<string, string> } | undefined
+  /**
+   * The most recent upstream failure, in its own words.
+   *
+   * It is kept verbatim and unedited: a report that carries it does not
+   * depend on the reader describing it correctly.
+   */
+  let lastUpstreamError: string | undefined
   /** The plan the account subscribes to, as the last read found it. */
   let plan: PlanStatus | undefined
 
@@ -569,6 +581,57 @@ function apply(ctx: Context) {
   }
 
   /**
+   * This plugin's own version, read from the package it was installed as.
+   *
+   * It is read at runtime rather than written into the bundle, so the number
+   * in a report is the number of the package that is actually installed — a
+   * number baked in at build time would drift from it on the first release
+   * that forgot to rebuild.
+   *
+   * A package root that cannot be read leaves the field out rather than
+   * guessing: a wrong version in a report is worse than no version.
+   */
+  function readPluginVersion(): string | undefined {
+    try {
+      const manifest = JSON.parse(
+        readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+      ) as { version?: unknown }
+      return typeof manifest.version === 'string' ? manifest.version : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** This plugin's own version, read once when it loads. */
+  const PLUGIN_VERSION = readPluginVersion()
+
+  /**
+   * The facts a report needs, gathered in one place.
+   *
+   * Every line is a fact about this installation and nothing here changes
+   * anything: the section exists so that a person can copy it into a report
+   * without having to work out what to include.
+   *
+   * The host's own version is not in here, because the host does not offer
+   * it to a plugin — a line that had to be guessed would be worse than no
+   * line at all.
+   */
+  const buildDiagnostics = async (): Promise<DiagnosticsStatus> => {
+    const auth = await buildAuthStatus()
+    return {
+      pluginVersion: PLUGIN_VERSION,
+      region,
+      // The same host serves more than one purpose, so the list is deduped:
+      // a line that says the same thing twice is noise in a report.
+      hosts: [...new Set([MINIMAX_GATEWAYS[region], MINIMAX_ACCOUNT_HOSTS[region], MINIMAX_API_HOSTS[region]])],
+      authSource: auth.state === 'signed-in' ? buildLoginStatus().source : auth.state,
+      catalogSource: catalog.source,
+      lastUpstreamError,
+      ...capability === undefined ? {} : { capability: capability.findings },
+    }
+  }
+
+  /**
    * The plan the account holds, as the card reads it.
    *
    * It comes from the same membership answer as the balance, so it is free.
@@ -754,6 +817,8 @@ function apply(ctx: Context) {
       usageProfile: buildUsageProfileStatus(),
       plan: buildPlanStatus(),
       capability,
+      diagnostics: await buildDiagnostics(),
+      showPill: pluginState.showPill ?? true,
       generation: {
         imageModels: [...IMAGE_MODELS],
         imageAspectRatios: [...IMAGE_ASPECT_RATIOS],
@@ -841,6 +906,19 @@ function apply(ctx: Context) {
         }
         return { ok: true, state: result.state }
       }
+      case 'pillVisible': {
+        // A display choice: it changes nothing about the account and
+        // nothing about what the plugin does, so it takes effect at once and
+        // there is no draft to save. The next status read carries it, and
+        // the composer picks it up from there.
+        const showPill = body.showPill
+        if (typeof showPill !== 'boolean') {
+          return { ok: false, error: 'showPill 必须是布尔值' }
+        }
+        pluginState = { ...pluginState, showPill }
+        await writePluginState(pluginState)
+        return { ok: true, showPill }
+      }
       case 'settings': {
         const autoCheckin = body.autoCheckin
         if (typeof autoCheckin !== 'boolean') {
@@ -871,11 +949,12 @@ function apply(ctx: Context) {
     if (planApiKey !== undefined) return planApiKey
     const account = await resolveAccountCredential()
     if (account.state !== 'signed-in') {
-      throw new GenerationError('尚未登录 MiniMax Code')
+      // Refused here, before the request left: nothing was spent.
+      throw new GenerationError('尚未登录 MiniMax Code', undefined, { kind: 'credentials', charged: false })
     }
     const key = await fetchPlanApiKey(account.credential, region)
     if (key === undefined) {
-      throw new GenerationError('账户没有开放平台密钥，无法调用生成接口')
+      throw new GenerationError('账户没有开放平台密钥，无法调用生成接口', undefined, { kind: 'credentials', charged: false })
     }
     planApiKey = key
     return key
@@ -921,7 +1000,11 @@ function apply(ctx: Context) {
   const runGeneration = async (body: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const kind = body.kind
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
-    if (prompt.length === 0) return { ok: false, error: '请填写提示词' }
+    // A refusal this plugin makes before the request leaves the process:
+    // nothing was spent, and the kind says so.
+    if (prompt.length === 0) {
+      return { ok: false, error: '请填写提示词', kind: 'local', charged: false, cooldownMs: 0 }
+    }
     const apiKey = await resolvePlanApiKey()
     if (kind === 'video') {
       const taskId = await startVideoTask({
@@ -1149,11 +1232,27 @@ function apply(ctx: Context) {
           // A refusal from the upstream is the caller's answer, not a
           // failure of the plugin: the reason is what the person needs.
           const status = error instanceof GenerationError ? 400 : 500
+          // The upstream's own words are kept for the diagnostics section:
+          // a report carries them verbatim instead of a paraphrase.
+          if (error instanceof GenerationError) {
+            lastUpstreamError = error.verdict.upstream?.message ?? error.message
+          }
           res.writeHead(status, { 'Content-Type': 'application/json' })
+          const verdict = error instanceof GenerationError ? error.verdict : undefined
           res.end(JSON.stringify({
             ok: false,
             error: error instanceof Error ? error.message : String(error),
             ...(error instanceof GenerationError && error.code !== undefined ? { code: error.code } : {}),
+            // What kind of failure this is, and whether the upstream had
+            // already accepted the work — the caller says so in its own
+            // language, and needs to know whether a retry costs again.
+            ...(verdict === undefined ? {} : {
+              kind: verdict.kind,
+              charged: verdict.charged,
+              cooldownMs: cooldownFor(verdict),
+            }),
+            // The upstream's own words, verbatim: the evidence a report needs.
+            ...(verdict?.upstream === undefined ? {} : { upstream: verdict.upstream }),
           }))
         }
       },

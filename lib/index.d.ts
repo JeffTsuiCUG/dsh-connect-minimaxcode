@@ -719,6 +719,15 @@ interface PluginState {
   schemaVersion: number;
   /** Whether the plugin claims the daily grant on its own. */
   autoCheckin: boolean;
+  /**
+   * Whether the balance shows in the composer.
+   *
+   * A display choice rather than a setting about the account: it changes
+   * nothing upstream and nothing about what the plugin does, only whether
+   * the balance is drawn beside the composer. It therefore takes effect at
+   * once, with no draft to save — see the note on the settings below.
+   */
+  showPill?: boolean;
   /** The day the last claim happened, in the account's time zone. */
   lastClaimDay?: string;
   /** When the last claim happened, in milliseconds since the epoch. */
@@ -1026,6 +1035,29 @@ interface UsageStatus {
   /** How many requests were measured. */
   requests: number;
 }
+/**
+ * The facts a report needs, gathered in one place.
+ *
+ * The point of this section is that it can be copied as a whole into a
+ * report: every line is a fact about this installation, and nothing here
+ * changes any setting — there is no control on it, by design.
+ */
+interface DiagnosticsStatus {
+  /** This plugin's own version. */
+  pluginVersion?: string;
+  /** The region this plugin talks to. */
+  region?: string;
+  /** The upstream hosts this plugin uses. */
+  hosts?: string[];
+  /** How the plugin is signed in. */
+  authSource?: string;
+  /** Where the model catalog came from. */
+  catalogSource?: string;
+  /** The most recent upstream failure, in its own words. */
+  lastUpstreamError?: string;
+  /** What the host offered the card, one entry per piece. */
+  capability?: Record<string, string>;
+}
 /** The plan the account subscribes to, as the card reads it. */
 interface PlanStatus {
   /** Whether the account holds a plan. */
@@ -1137,6 +1169,10 @@ interface StatusDocument {
   usageProfile?: UsageProfileStatus;
   /** The plan the account subscribes to, when there is one. */
   plan?: PlanStatus;
+  /** The facts a report needs, gathered in one place. */
+  diagnostics?: DiagnosticsStatus;
+  /** Whether the balance is drawn beside the composer. */
+  showPill?: boolean;
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
   /** What the host offered the card the last time it looked. */
@@ -1178,6 +1214,10 @@ interface StatusDeps {
   usageProfile?: UsageProfileStatus;
   /** The plan the account subscribes to, when there is one. */
   plan?: PlanStatus;
+  /** The facts a report needs, gathered in one place. */
+  diagnostics?: DiagnosticsStatus;
+  /** Whether the balance is drawn beside the composer. */
+  showPill?: boolean;
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
   /** What the host offered the card the last time it looked. */

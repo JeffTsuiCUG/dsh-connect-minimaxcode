@@ -137,6 +137,30 @@ export interface UsageStatus {
   requests: number
 }
 
+/**
+ * The facts a report needs, gathered in one place.
+ *
+ * The point of this section is that it can be copied as a whole into a
+ * report: every line is a fact about this installation, and nothing here
+ * changes any setting — there is no control on it, by design.
+ */
+export interface DiagnosticsStatus {
+  /** This plugin's own version. */
+  pluginVersion?: string
+  /** The region this plugin talks to. */
+  region?: string
+  /** The upstream hosts this plugin uses. */
+  hosts?: string[]
+  /** How the plugin is signed in. */
+  authSource?: string
+  /** Where the model catalog came from. */
+  catalogSource?: string
+  /** The most recent upstream failure, in its own words. */
+  lastUpstreamError?: string
+  /** What the host offered the card, one entry per piece. */
+  capability?: Record<string, string>
+}
+
 /** The plan the account subscribes to, as the card reads it. */
 export interface PlanStatus {
   /** Whether the account holds a plan. */
@@ -237,6 +261,10 @@ export interface StatusDocument {
   usageProfile?: UsageProfileStatus
   /** The plan the account subscribes to, when there is one. */
   plan?: PlanStatus
+  /** The facts a report needs, gathered in one place. */
+  diagnostics?: DiagnosticsStatus
+  /** Whether the balance is drawn beside the composer. */
+  showPill?: boolean
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -275,6 +303,10 @@ export interface StatusDeps {
   usageProfile?: UsageProfileStatus
   /** The plan the account subscribes to, when there is one. */
   plan?: PlanStatus
+  /** The facts a report needs, gathered in one place. */
+  diagnostics?: DiagnosticsStatus
+  /** Whether the balance is drawn beside the composer. */
+  showPill?: boolean
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -318,6 +350,8 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.login === undefined ? {} : { login: deps.login },
     ...deps.usageProfile === undefined ? {} : { usageProfile: deps.usageProfile },
     ...deps.plan === undefined ? {} : { plan: deps.plan },
+    ...deps.diagnostics === undefined ? {} : { diagnostics: deps.diagnostics },
+    ...deps.showPill === undefined ? {} : { showPill: deps.showPill },
     ...deps.capability === undefined ? {} : { capability: deps.capability },
     ...deps.generation === undefined ? {} : { generation: deps.generation },
   }

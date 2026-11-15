@@ -161,6 +161,10 @@ interface StatusDocument {
     tier?: string
     expiresAtMs?: number
   }
+  /** The facts a report needs, gathered in one place. */
+  diagnostics?: DiagnosticsStatus
+  /** Whether the balance is drawn beside the composer. */
+  showPill?: boolean
   usageProfile?: {
     state: 'ok' | 'unavailable'
     totalDays?: number
@@ -200,6 +204,61 @@ interface StatusDocument {
     verificationUriComplete?: string
     expiresAtMs?: number
   }
+}
+
+/**
+ * The facts a report needs, gathered in one place.
+ *
+ * The plugin's own section of the status document: a read-only list of what
+ * this installation is and what it last heard from the upstream.
+ */
+interface DiagnosticsStatus {
+  pluginVersion?: string
+  region?: string
+  hosts?: string[]
+  authSource?: string
+  catalogSource?: string
+  lastUpstreamError?: string
+  capability?: Record<string, string>
+}
+
+/**
+ * What a failed generation call tells the person.
+ *
+ * A refusal is three things at once: what to do next, whether the upstream
+ * had already accepted the work (so a retry is not made to pay twice), and
+ * the upstream's own words — the evidence a report needs, and the only part
+ * nobody can paraphrase for them.
+ */
+interface GenerationNote {
+  /** What to do next, in the reader's language. */
+  text: string
+  /** The upstream's own words, kept verbatim. */
+  upstream?: string
+  /** Whether the upstream had already accepted the work. */
+  charged?: boolean
+}
+
+/**
+ * What the card shows below its controls.
+ *
+ * A plain sentence for the refusals this plugin makes itself, and a
+ * structured note for a failed call, which carries more than one sentence.
+ */
+type Note = string | GenerationNote
+
+/** What a failed generation call answered. */
+interface GenerationFailure {
+  ok?: boolean
+  error?: string
+  /** The kind of failure, as the server classified it. */
+  kind?: 'credentials' | 'parameters' | 'subscription' | 'quota' | 'rate-limited' | 'upstream' | 'local'
+  /** Whether the upstream had already accepted the work. */
+  charged?: boolean
+  /** How long to hold off before trying again, in milliseconds. */
+  cooldownMs?: number
+  /** The upstream's own words. */
+  upstream?: { status: number; code?: number; message: string }
 }
 
 ;(function bootstrapMinimaxCodeClient(): void {
@@ -272,6 +331,26 @@ interface StatusDocument {
     usageRanking: '用量排名前 {percent}%',
     usageBestDay: '最活跃的一天 {date}',
     planNoSubscription: '未订阅 M Plan（仅积分包），因此没有限额窗口',
+    displayTitle: '显示',
+    showPill: '在对话输入框显示积分余额',
+    diagnosticsTitle: '诊断信息',
+    diagnosticsHint: '这一栏是只读的，可整段复制进 issue，它不会改变任何设置。',
+    diagnosticsPluginVersion: '插件版本',
+    diagnosticsRegion: '区域',
+    diagnosticsHosts: '上游地址',
+    diagnosticsAuthSource: '登录来源',
+    diagnosticsCatalogSource: '模型目录来源',
+    diagnosticsCapability: '宿主能力',
+    diagnosticsLastError: '最近一次上游错误',
+    failureCredentials: '登录凭据被拒绝。请在插件页重新登录 MiniMax Code。',
+    failureParameters: '请求的参数被上游拒绝。请调整提示词或选项后重试。',
+    failureSubscription: '账户没有可用的订阅套餐，因此调用被拒绝。请确认 M Plan 订阅是否生效。',
+    failureQuota: '账户的额度已用尽。请等待额度恢复，或查看套餐的限额窗口。',
+    failureRateLimited: '上游正在限流。请稍后重试。',
+    failureLocal: '请求没有发出，因此没有产生任何消耗。',
+    failureUpstream: '上游拒绝了这次请求。请把下面的原文一并反馈，以便定位。',
+    failureCharged: '本次请求可能已被上游计费，请勿立即重试。',
+    failureUpstreamDetail: '上游原文',
     planGeneric: 'M Plan 订阅',
     planExpires: '{date} 到期',
     generateTitle: '生成',
@@ -358,6 +437,26 @@ interface StatusDocument {
     usageRanking: 'Top {percent}% by usage',
     usageBestDay: 'Busiest day {date}',
     planNoSubscription: 'No M Plan subscription (credits only), so there are no usage windows',
+    displayTitle: 'Display',
+    showPill: 'Show the credit balance in the composer',
+    diagnosticsTitle: 'Diagnostics',
+    diagnosticsHint: 'This section is read-only. Copy it into an issue as it stands; it changes nothing.',
+    diagnosticsPluginVersion: 'Plugin version',
+    diagnosticsRegion: 'Region',
+    diagnosticsHosts: 'Upstream hosts',
+    diagnosticsAuthSource: 'Signed in via',
+    diagnosticsCatalogSource: 'Catalog source',
+    diagnosticsCapability: 'Host capabilities',
+    diagnosticsLastError: 'Last upstream error',
+    failureCredentials: 'The credential was refused. Sign in to MiniMax Code again on the plugin page.',
+    failureParameters: 'The upstream rejected the request parameters. Adjust the prompt or the options and try again.',
+    failureSubscription: 'The account holds no plan, so the call was refused. Check whether the M Plan subscription is active.',
+    failureQuota: "The allowance is spent. Wait for it to recover, or check the plan's limit windows.",
+    failureRateLimited: 'The upstream is throttling. Try again a little later.',
+    failureLocal: 'The request never left the plugin, so nothing was spent.',
+    failureUpstream: 'The upstream refused the request. Please report the original words below so it can be traced.',
+    failureCharged: 'This request may already have been charged for upstream; do not retry it at once.',
+    failureUpstreamDetail: 'Upstream words',
     planGeneric: 'M Plan subscription',
 
     planExpires: 'until {date}',
@@ -604,6 +703,112 @@ interface StatusDocument {
       }
 
       /**
+       * The sentence that says what to do about a failed generation call.
+       *
+       * The kind is the server's verdict on what the failure *is*, and each
+       * kind has one remedy; the upstream's own words are kept beside it
+       * rather than in place of it, because the words are the evidence and
+       * the remedy is the help.
+       */
+      function generationRemedy(t: (key: string, params?: Record<string, unknown>) => string, kind?: GenerationFailure['kind']): string {
+        switch (kind) {
+          case 'credentials': return t('failureCredentials')
+          case 'parameters': return t('failureParameters')
+          case 'subscription': return t('failureSubscription')
+          case 'quota': return t('failureQuota')
+          case 'rate-limited': return t('failureRateLimited')
+          case 'local': return t('failureLocal')
+          default: return t('failureUpstream')
+        }
+      }
+
+      /**
+       * Turn a failed call into what the person is shown.
+       *
+       * Three things travel together: the remedy, whether the upstream had
+       * already accepted the work, and the upstream's own words. The last
+       * one is shown collapsed rather than inline — it can be long, and it is
+       * read when a report is being written, not when the failure happens.
+       */
+      function generationNote(
+        t: (key: string, params?: Record<string, unknown>) => string,
+        failure: GenerationFailure,
+      ): GenerationNote {
+        const upstream = failure.upstream?.message ?? failure.error
+        return {
+          text: generationRemedy(t, failure.kind),
+          upstream,
+          charged: failure.charged === true,
+        }
+      }
+
+      /**
+       * The diagnostics section: a read-only list of facts about this
+       * installation.
+       *
+       * Its purpose is to be copied. Every line is a fact, nothing here
+       * changes a setting, and the whole thing can be pasted into a report
+       * as it stands — which is the whole point, because the facts a report
+       * needs are exactly the ones nobody can be expected to remember.
+       */
+      function diagnosticsBlock(t: (key: string, params?: Record<string, unknown>) => string, diagnostics?: DiagnosticsStatus): unknown {
+        if (diagnostics === undefined) return null
+        const lines: string[] = []
+        const add = (label: string, value: string | undefined): void => {
+          if (value !== undefined && value.length > 0) lines.push(`${label}: ${value}`)
+        }
+        add(t('diagnosticsPluginVersion'), diagnostics.pluginVersion)
+        add(t('diagnosticsRegion'), diagnostics.region)
+        add(t('diagnosticsHosts'), diagnostics.hosts?.join('  '))
+        add(t('diagnosticsAuthSource'), diagnostics.authSource)
+        add(t('diagnosticsCatalogSource'), diagnostics.catalogSource)
+        add(t('diagnosticsCapability'), diagnostics.capability === undefined
+          ? undefined
+          : Object.entries(diagnostics.capability).map(([key, value]) => `${key}=${value}`).join('  '))
+        add(t('diagnosticsLastError'), diagnostics.lastUpstreamError)
+        if (lines.length === 0) return null
+        return h('div', { style: boxStyle, 'data-minimax-diagnostics': true },
+          h('div', { style: boxTitleStyle }, t('diagnosticsTitle')),
+          h('pre', { style: upstreamTextStyle, 'data-minimax-diagnostics-text': true }, lines.join('\n')),
+          h('div', { style: mutedStyle }, t('diagnosticsHint')),
+        )
+      }
+
+      /**
+       * A note the card shows.
+       *
+       * Most notes are one sentence — the delivery refusals name what is
+       * missing — while a failed call carries its evidence with it. Both are
+       * drawn by the same helper, so the two kinds sit in one place.
+       */
+      function noteBlock(t: (key: string, params?: Record<string, unknown>) => string, note: Note): unknown {
+        if (typeof note === 'string') return h('span', { style: mutedStyle }, note)
+        return generationNoteBlock(t, note)
+      }
+
+      /**
+       * The note as it is drawn: the remedy, then the upstream's words.
+       *
+       * The charged case says so in its own line: a person who was told
+       * only "try again" would spend again, and the upstream may already
+       * have taken the first one.
+       */
+      function generationNoteBlock(t: (key: string, params?: Record<string, unknown>) => string, note: GenerationNote): unknown {
+        return h('div', { style: mutedStyle, 'data-minimax-generation-note': true },
+          h('div', null, note.text),
+          note.charged === true
+            ? h('div', { style: warnStyle, 'data-minimax-generation-charged': true }, t('failureCharged'))
+            : null,
+          note.upstream === undefined
+            ? null
+            : h('details', { style: mutedStyle, 'data-minimax-generation-upstream': true },
+              h('summary', null, t('failureUpstreamDetail')),
+              h('pre', { style: upstreamTextStyle }, note.upstream),
+            ),
+        )
+      }
+
+      /**
        * What the page card's plan box says when it has no windows to show.
        *
        * An empty box would read as "nothing loaded yet" and invite a refresh
@@ -765,6 +970,9 @@ interface StatusDocument {
         const projection = props.useProjection?.('modelSelection')
         const provider = (projection?.next ?? projection?.lastUsed)?.provider
         if (provider !== undefined && provider !== MINIMAX_PROVIDER_ID) return null
+        // The balance may be hidden: a display choice, applied at once.
+        const [status] = useStatus()
+        if (status?.showPill === false) return null
         return h(CreditPill, props)
       }
 
@@ -832,7 +1040,7 @@ interface StatusDocument {
 
         const [prompt, setPrompt] = React.useState('')
         const [busy, setBusy] = React.useState(false)
-        const [note, setNote] = React.useState('')
+        const [note, setNote] = React.useState<Note | undefined>(undefined)
 
         /**
          * The session's own send path.
@@ -926,21 +1134,20 @@ interface StatusDocument {
           const text = prompt.trim()
           if (text === '') return
           setBusy(true)
-          setNote('')
+          setNote(undefined)
           try {
             const response = await fetch(GENERATE_PATH, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ kind: 'image', prompt: text, area: '1K' }),
             })
-            const body = await response.json() as {
+            const body = await response.json() as GenerationFailure & {
               ok?: boolean
-              error?: string
               dataUrl?: string
               mediaType?: string
             }
             if (body.ok !== true || body.dataUrl === undefined) {
-              setNote(body.error ?? t('generateFailed'))
+              setNote(generationNote(t, body))
               return
             }
             const part = imagePart(body.dataUrl, body.mediaType ?? 'image/jpeg')
@@ -989,7 +1196,7 @@ interface StatusDocument {
               setOpen(false)
               // The picture's own arrival is the feedback: it is in the
               // conversation now, so the composer needs no banner.
-              setNote('')
+              setNote(undefined)
               return
             }
             const drafts = draftFace()
@@ -1018,7 +1225,7 @@ interface StatusDocument {
               addAttachments(created.map(draft => draft.id))
               setPrompt('')
               setOpen(false)
-              setNote('')
+              setNote(undefined)
               return
             }
             setNote(t('generateSendFailed'))
@@ -1034,7 +1241,7 @@ interface StatusDocument {
             type: 'button',
             style: buttonStyle,
             title: t('generateToChatHint'),
-            onClick: () => { setOpen(true); setNote('') },
+            onClick: () => { setOpen(true); setNote(undefined) },
           }, t('generateToChat'))
         }
         return h('div', { style: dockStyle, 'data-minimax-generate-dock': true },
@@ -1055,9 +1262,9 @@ interface StatusDocument {
             type: 'button',
             style: buttonStyle,
             disabled: busy,
-            onClick: () => { setOpen(false); setPrompt(''); setNote('') },
+            onClick: () => { setOpen(false); setPrompt(''); setNote(undefined) },
           }, '✕'),
-          note === '' ? null : h('span', { style: mutedStyle }, note),
+          note === undefined ? null : noteBlock(t, note),
         )
       }
 
@@ -1214,7 +1421,7 @@ interface StatusDocument {
         const [resolution, setResolution] = React.useState('2K')
         const [ratio, setRatio] = React.useState('16:9')
         const [busy, setBusy] = React.useState(false)
-        const [note, setNote] = React.useState('')
+        const [note, setNote] = React.useState<Note | undefined>(undefined)
         const [picture, setPicture] = React.useState<{ dataUrl: string; size?: string; saved?: boolean } | undefined>(undefined)
         const [video, setVideo] = React.useState<{ url: string; status?: string } | undefined>(undefined)
 
@@ -1223,7 +1430,7 @@ interface StatusDocument {
         /** Ask for a picture; the answer carries the bytes inline. */
         async function makeImage(): Promise<void> {
           setBusy(true)
-          setNote('')
+          setNote(undefined)
           setVideo(undefined)
           try {
             const response = await fetch(GENERATE_PATH, {
@@ -1237,15 +1444,14 @@ interface StatusDocument {
                 area,
               }),
             })
-            const body = await response.json() as {
+            const body = await response.json() as GenerationFailure & {
               ok?: boolean
-              error?: string
               dataUrl?: string
               size?: string
               attachment?: { attachmentId?: string }
             }
             if (body.ok !== true || body.dataUrl === undefined) {
-              setNote(body.error ?? t('generateFailed'))
+              setNote(generationNote(t, body))
               return
             }
             setPicture({ dataUrl: body.dataUrl, size: body.size, saved: body.attachment !== undefined })
@@ -1259,7 +1465,7 @@ interface StatusDocument {
         /** Start a video task, then wait for it the way the upstream does. */
         async function makeVideo(): Promise<void> {
           setBusy(true)
-          setNote('')
+          setNote(undefined)
           setPicture(undefined)
           try {
             const response = await fetch(GENERATE_PATH, {
@@ -1273,9 +1479,9 @@ interface StatusDocument {
                 ratio,
               }),
             })
-            const body = await response.json() as { ok?: boolean; error?: string; taskId?: string }
+            const body = await response.json() as GenerationFailure & { ok?: boolean; taskId?: string }
             if (body.ok !== true || body.taskId === undefined) {
-              setNote(body.error ?? t('generateFailed'))
+              setNote(generationNote(t, body))
               return
             }
             // The task takes a minute and a half; the upstream is asked every
@@ -1283,14 +1489,14 @@ interface StatusDocument {
             for (let attempt = 0; attempt < 60; attempt += 1) {
               await new Promise(resolve => setTimeout(resolve, 10000))
               const polled = await fetch(`${GENERATE_PATH}?taskId=${encodeURIComponent(body.taskId)}`)
-              const task = await polled.json() as { status?: string; url?: string; error?: string }
+              const task = await polled.json() as GenerationFailure & { status?: string; url?: string }
               if (task.url !== undefined) {
                 setVideo({ url: task.url, status: task.status })
-                setNote('')
+                setNote(undefined)
                 return
               }
               if (task.status !== undefined && /fail|cancel/i.test(task.status)) {
-                setNote(task.error ?? t('generateFailed'))
+                setNote(generationNote(t, task))
                 return
               }
             }
@@ -1345,7 +1551,7 @@ interface StatusDocument {
               disabled: busy || prompt.trim() === '',
               onClick: () => { void (mode === 'image' ? makeImage() : makeVideo()) },
             }, busy ? (mode === 'video' ? t('generateVideoRunning') : t('generateRunning')) : t('generateRun'))),
-          note === '' ? null : h('div', { style: mutedStyle }, note),
+          note === undefined ? null : noteBlock(t, note),
           picture === undefined
             ? null
             : h('div', { style: generationResultStyle, 'data-minimax-generation-image': true },
@@ -1475,6 +1681,25 @@ interface StatusDocument {
               login !== undefined && login.state !== 'signed-in'
                 ? h('div', { style: span2Style }, loginBlock(t, login, refresh))
                 : null,
+              // The read-only facts, last in the card: a report is made from
+              // them, and they are of no use to the person using the plugin.
+              diagnosticsBlock(t, status?.diagnostics),
+              // A display choice: it takes effect at once, with no draft to
+              // save. The other things on this page are facts to read; this
+              // is the one control, and it changes only what is drawn.
+              h('div', { style: { ...boxStyle, ...span2Style }, 'data-minimax-pill-toggle': true },
+                h('div', { style: boxTitleStyle }, t('displayTitle')),
+                h('label', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px' } },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: status?.showPill !== false,
+                    onChange: (event: { target: { checked: boolean } }) => {
+                      void act('pillVisible', { showPill: event.target.checked })
+                    },
+                  }),
+                  h('span', null, t('showPill')),
+                ),
+              ),
             ),
           ),
           // The generation panel does not need the balance: it spends the
@@ -1617,6 +1842,20 @@ interface StatusDocument {
       }
       const planExpiryStyle = { fontSize: '13px', fontWeight: 400, lineHeight: '1.6' }
       const mutedStyle = { opacity: 0.7, fontSize: '12px' }
+      /**
+       * The upstream's own words, as they arrive.
+       *
+       * Kept monospaced and wrapped, because it is quoted evidence: a report
+       * should carry it exactly as the upstream wrote it.
+       */
+      const upstreamTextStyle = {
+        margin: '4px 0 0',
+        whiteSpace: 'pre-wrap' as const,
+        wordBreak: 'break-word' as const,
+        fontFamily: 'var(--dsh-mono, ui-monospace, monospace)',
+        fontSize: '11px',
+        opacity: 0.9,
+      }
       const actionButtonStyle = {
         appearance: 'none' as const,
         background: 'transparent',

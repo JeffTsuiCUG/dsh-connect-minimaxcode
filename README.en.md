@@ -419,7 +419,45 @@ The OAuth token is valid for about an hour and is refreshed automatically by the
 - **The context window is declared as the gateway's real ceiling (1,000,000), not the 512,000 in the catalog.** Upstream's `limit.context` is the *default* window and the billing tier boundary (input above 512k costs more); the largest entry of `context_window_options` is the ceiling the gateway enforces. Measured on 2026-10-25: 946,206 tokens were served normally, 1,050,000 were refused (`invalid params, context window exceeds limit (2013)`). Declaring 512,000 meant every turn of a long conversation was reported as `pi-ai detected context overflow` — while the model had answered perfectly well and the reply was thrown away.
 - **The device code flow needs `account.minimax.cn` to be reachable**, and the browser that authorizes it has to be able to sign in to a MiniMax account. On some restricted networks the authorization page cannot be opened.
 
+## How to read the version number
+
+The plugin follows semantic versioning, and **each level means the same thing** — so the version number says what to expect:
+
+| Version | What it means |
+| --- | --- |
+| **patch** (x.y.**z**) | a defect is fixed. **No new configuration key, no interface change.** The existing surface and behaviour stay; one thing that was wrong is now right. |
+| **minor** (x.**y**.0) | a **user-visible** capability is added, or the shape of an existing message changes. **No interface change**; the meaning of the existing configuration keys is unchanged. |
+| **major** (**x**.0.0) | a breaking change: the meaning of an existing configuration key changes, the surface is rearranged enough to need re-learning, or the host interface it depends on has moved on. |
+
+Every entry in the changelog opens with why it is that level, and with **what this release deliberately did not do** — the boundaries are worth knowing more than the features, so they come first.
 ## Changelog
+
+### 0.7.0 (2026-11-15)
+
+> The version is **minor**: a new "Diagnostics" section and a switch for showing the balance in the composer, and a different shape for the message a failed generation shows. **No interface change**; the meaning of the existing configuration keys is unchanged.
+
+#### Added
+
+- **A "Diagnostics" section on the plugin page**: a read-only list of facts — the plugin version, the region, the upstream hosts, how the plugin is signed in, where the model catalog came from, which pieces of the host it found (eight of them), and **the upstream's own words about its most recent failure**. The one reason it exists is that **it can be copied into an issue as it stands**: there is no control in it that changes anything. The host's own version is **not** in it, because the host does not hand its version to a plugin — a line that had to be guessed would be worse than no line.
+- **A "show the credit balance in the composer" switch**: on by default. Turning it off hides the balance in the pill and changes nothing else; it can be turned back on at any time.
+
+#### Changed
+
+- **A failed generation now says three things instead of one**: ① what to do (by the kind of failure); ② **that this request may already have been charged for** (when a video task was submitted and could not be read back); ③ **the upstream's own words**, collapsed, quoted rather than paraphrased.
+- **Failures are classified** into `credentials` / `parameters` / `subscription` / `quota` / `rate-limited` / `upstream` / `local`, each with its own remedy. The classification reads the failure's *shape* (the HTTP status and the wording) rather than its code — a code is a number some other system chose, and the day it is renamed or withdrawn, a classifier keyed on it would quietly stop matching, while one keyed on what the failure *is* keeps working.
+
+#### Deliberately not done
+
+- **The session-title requests are not diverted to a lighter model.** The host sends one per new session, and it goes to the main model. Measured (2026-11-15): **our upstream catalog holds two models** (`MiniMax-M3` and `MiniMax-M3.1-Flash`, both with a 512K context, a 128K output and reasoning), there is **no lighter one**, and the catalog carries **no price field** — so there is no way to tell what diverting them would save. A change with no measured evidence behind it is not made.
+- **No cooldown for the failures that spent nothing.** Only the ones where the upstream may have accepted the work, and may have charged for it, are held back; a bad parameter, a missing sign-in and a request refused locally cost nothing and may be retried at once.
+- **No host version in the diagnostics.** The host does not offer its version to a plugin; that line could only be guessed.
+- **No "drop the tools for this model" fallback.** Letting a model quietly lose every tool is harder to notice than an error.
+
+#### Testing
+
+- New: `tests/failure.spec.ts` (9), `tests/generation-cost.spec.ts` (7), `tests/failure-wording.spec.ts` (5), `tests/diagnostics.spec.ts` (6), `tests/control-layers.spec.ts` (6).
+- **Mutation checks**: every fix in this release was reverted on its own to confirm the matching case turns red. All seven mutations of the classifier and all four of the cost distinction were caught. One mutation of the cost distinction **survived at first** — the case exercised the HTTP-failure branch while the mutation changed the "the answer was not JSON" one. Adding a case for that road caught it. It is exactly what "the test passed but was not proving what it claimed" looks like.
+- The protocol findings moved into `docs/` (published with the package): H3 generation, the account endpoints, the credentials and the error taxonomy, each fact carrying the date it was measured.
 
 ### 0.6.9 (2026-11-13)
 
