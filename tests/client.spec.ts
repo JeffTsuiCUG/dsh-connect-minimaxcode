@@ -429,7 +429,7 @@ describe('client bundle', () => {
     return component
   }
 
-  it('hides the readout and stops polling while another provider is selected', async () => {
+  it('hides the readout while another provider is selected', async () => {
     const loaded = loadClient()
     const harness = reactHarness()
     const component = registeredComponent(loaded, harness)
@@ -439,8 +439,12 @@ describe('client bundle', () => {
     // Nothing at all: another connector's balance would be the wrong number.
     expect(tree).toBeNull()
     await new Promise(resolve => setTimeout(resolve, 15))
-    // And because nothing rendered, the shared store never subscribed.
-    expect(loaded.fetchCount).toBe(0)
+    // The gate's hooks run before its conditional return — React tracks
+    // hooks by order, and a hook that skipped a render used to make the
+    // component collapse on the way back. The shared store therefore
+    // subscribes even while hidden, which costs one lightweight poll and
+    // keeps the gate stable across the provider changes it guards.
+    expect(loaded.fetchCount).toBe(1)
   })
 
   it('draws the readout when a MiniMax model is the one selected', async () => {

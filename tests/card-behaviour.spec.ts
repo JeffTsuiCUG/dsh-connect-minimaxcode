@@ -47,6 +47,7 @@ function reactHarness() {
       return [states[index], (next: unknown) => { states[index] = next }]
     },
     useEffect: (effect: () => unknown) => { void effect() },
+    useRef: (initial: unknown) => ({ current: initial }),
   }
   return {
     react,
@@ -90,6 +91,11 @@ interface Element {
   type: unknown
   props: Record<string, unknown>
   children: unknown[]
+}
+
+/** The style of an element, as the harness records it. */
+function styleOf(entry: Element | undefined): Record<string, unknown> {
+  return (entry?.props.style ?? {}) as Record<string, unknown>
 }
 
 /**
@@ -216,14 +222,10 @@ describe('what the card draws', () => {
     expect(text).toContain('0.7.0')
     expect(text).toContain('desktop-app')
     expect(text).toContain('no active token plan subscription')
-    // The whole block is one element's content, so a report can quote it.
-    const block = all(rendered).find(entry => entry.props['data-minimax-diagnostics-text'] === true)
-    expect(block, '诊断文本不是单个可复制的元素').toBeDefined()
-    // The pre element's content is its child, a single string: the block can
-    // be quoted as it stands.
-    const content = block!.children[0]
-    expect(String(content)).toContain('sessionId=present')
-    expect(String(content)).toContain('diagnosticsRegion: cn')
+    // The facts are ordinary rows; the upstream's words are the only
+    // collapsed part, and they carry the original text.
+    expect(all(rendered).some(entry => entry.props['data-minimax-diagnostics-row'] !== undefined)).toBe(true)
+    expect(textOf(rendered)).toContain('sessionId=present')
   })
 
   it('draws the display switch, and pressing it calls the action once', async () => {
@@ -286,5 +288,114 @@ describe('what the card draws', () => {
     expect(JSON.stringify(panelAfter)).toContain('data-minimax-generation-note')
     expect(JSON.stringify(panelAfter)).toContain('data-minimax-generation-charged')
     expect(JSON.stringify(panelAfter)).toContain('data-minimax-generation-upstream')
+  })
+})
+
+describe('the pill survives the render it used to collapse in', () => {
+  it('runs its hook before any conditional return', () => {
+    // A real React throws when a hook's order changes between renders, and
+    // the harness here is too forgiving to reproduce that. What can be
+    // pinned is the shape that makes the throw impossible: the hook is
+    // called before the first conditional return in the same component.
+    const source = readFileSync(CLIENT_PATH, 'utf8')
+    const start = source.indexOf('function CreditPillGate')
+    expect(start).toBeGreaterThan(-1)
+    const body = source.slice(start, source.indexOf('function GenerateDock', start))
+    const hook = body.indexOf('useStatus()')
+    const firstReturn = body.search(/return null/)
+    expect(hook, 'gate 没有调用 useStatus').toBeGreaterThan(-1)
+    expect(firstReturn, 'gate 里没有条件返回').toBeGreaterThan(-1)
+    expect(hook, 'useStatus 在条件返回之后 —— 这正是让余额消失的 bug').toBeLessThan(firstReturn)
+  })
+
+  it('keeps drawing the balance across a provider change and back', async () => {
+    // The gate used to return before its hook when another connector's model
+    // was selected: React tracks hooks by order, so the next render — with
+    // the hook back — collapsed. The shape is driven here exactly: draw,
+    // hide by provider, draw again with the choice on, then with it off.
+    const loaded = loadClient({ status: { ...STATUS, showPill: true } })
+    const harness = reactHarness()
+    loaded.registrations[0]!.factory(() => harness.react).apply(host(loaded))
+    const pill = pillOf(loaded)
+
+    // Render 1: our own model selected, balance shown.
+    const shown = await settled(harness, pill.component, {
+      t: (key: string) => key,
+      useProjection: () => ({ next: { provider: 'minimaxcode' } }),
+    })
+    // The gate returns the pill as an element; the pill itself is the next
+    // render.
+    const pillTree = (shown as { type: (childProps: unknown) => unknown; props: unknown }).type
+      ? (shown as { type: (childProps: unknown) => unknown }).type((shown as { props: unknown }).props)
+      : shown
+    expect(JSON.stringify(pillTree), '自己的模型下余额没有画出').toContain('data-minimax-credits')
+
+    // Render 2: another connector's model — the pill hides, and this render
+    // must run the same hooks in the same order.
+    const hidden = harness.render(pill.component, {
+      t: (key: string) => key,
+      useProjection: () => ({ next: { provider: 'someone-else' } }),
+    })
+    expect(JSON.stringify(hidden), '别人的模型下胶囊仍被画出').toBe('null')
+
+    // Render 3: back on our model, with the balance visible again — this is
+    // the render that used to collapse.
+    const again = harness.render(pill.component, {
+      t: (key: string) => key,
+      useProjection: () => ({ next: { provider: 'minimaxcode' } }),
+    })
+    const againTree = (again as { type: (childProps: unknown) => unknown; props: unknown }).type
+      ? (again as { type: (childProps: unknown) => unknown }).type((again as { props: unknown }).props)
+      : again
+    expect(JSON.stringify(againTree), '切回自己的模型后余额没有回来').toContain('data-minimax-credits')
+  })
+
+  it('hides the balance when the switch says so', async () => {
+    const loaded = loadClient({ status: { ...STATUS, showPill: false } })
+    const harness = reactHarness()
+    loaded.registrations[0]!.factory(() => harness.react).apply(host(loaded))
+    const off = await settled(harness, pillOf(loaded).component, {
+      t: (key: string) => key,
+      useProjection: () => ({ next: { provider: 'minimaxcode' } }),
+    })
+    expect(JSON.stringify(off), '开关关闭后余额仍被画出').toBe('null')
+  })
+})
+
+describe('the diagnostics section is drawn like the rest of the card', () => {
+  it('spans both columns in the same rounded box, with ordinary rows', async () => {
+    const loaded = loadClient({
+      status: {
+        ...STATUS,
+        diagnostics: {
+          pluginVersion: '0.7.0',
+          region: 'cn',
+          hosts: ['https://agent.minimax.cn'],
+          authSource: 'desktop-app',
+          catalogSource: 'live',
+          lastUpstreamError: 'no active token plan subscription',
+          capability: { sessionId: 'present' },
+        },
+      },
+    })
+    const harness = reactHarness()
+    loaded.registrations[0]!.factory(() => harness.react).apply(host(loaded))
+    const rendered = await settled(harness, pageOf(loaded).component, { t: (key: string) => key })
+    const block = all(rendered).find(entry => entry.props['data-minimax-diagnostics'] !== undefined)
+    expect(block, '诊断栏没有被画出').toBeDefined()
+    // The same rounded box the other sections use, spanning both columns.
+    expect(String(styleOf(block).background)).toContain('var(--dsh-muted')
+    expect(styleOf(block).borderRadius).toBe('10px')
+    expect(styleOf(block).gridColumn, '诊断栏没有占满整行').toBe('1 / -1')
+    // The facts are ordinary rows, not a monospaced dump: the section reads
+    // like the rest of the card.
+    const rows = all(rendered).filter(entry => entry.props['data-minimax-diagnostics-row'] !== undefined)
+    expect(rows.length).toBeGreaterThan(3)
+    for (const row of rows) {
+      expect(styleOf(row).display).toBe('flex')
+      expect(styleOf(row).justifyContent).toBe('space-between')
+    }
+    // Only the upstream's own words stay collapsed.
+    expect(all(rendered).some(entry => entry.props['data-minimax-generation-upstream'] !== undefined)).toBe(true)
   })
 })

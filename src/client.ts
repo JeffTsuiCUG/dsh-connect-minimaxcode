@@ -767,9 +767,23 @@ interface GenerationFailure {
           : Object.entries(diagnostics.capability).map(([key, value]) => `${key}=${value}`).join('  '))
         add(t('diagnosticsLastError'), diagnostics.lastUpstreamError)
         if (lines.length === 0) return null
-        return h('div', { style: boxStyle, 'data-minimax-diagnostics': true },
+        // The same rounded sub-card the rest of the page uses, spanning both
+        // columns, with the same rows: the facts are ordinary rows, and the
+        // one long value (the upstream's own words) is the only thing that is
+        // collapsed, because it is read when a report is written.
+        return h('div', { style: { ...boxStyle, ...span2Style }, 'data-minimax-diagnostics': true },
           h('div', { style: boxTitleStyle }, t('diagnosticsTitle')),
-          h('pre', { style: upstreamTextStyle, 'data-minimax-diagnostics-text': true }, lines.join('\n')),
+          ...lines.map((line, index) =>
+            h('div', { key: `diag-${index}`, style: rowStyle, 'data-minimax-diagnostics-row': true },
+              h('span', null, line.slice(0, line.indexOf(': '))),
+              h('span', { style: { textAlign: 'right' as const, opacity: 0.85 } }, line.slice(line.indexOf(': ') + 2)),
+            )),
+          diagnostics.lastUpstreamError === undefined
+            ? null
+            : h('details', { style: mutedStyle, 'data-minimax-generation-upstream': true },
+              h('summary', null, t('failureUpstreamDetail')),
+              h('pre', { style: upstreamTextStyle }, diagnostics.lastUpstreamError),
+            ),
           h('div', { style: mutedStyle }, t('diagnosticsHint')),
         )
       }
@@ -967,11 +981,16 @@ interface GenerationFailure {
        * that is true either way.
        */
       function CreditPillGate(props: SlotProps) {
+        // Every hook runs on every render, before any conditional return:
+        // React tracks them by order, and a hook that only runs on some
+        // renders makes the component collapse the moment the order changes.
+        // That was a real bug: the balance vanished whenever another
+        // connector's model was selected and then re-selected.
+        const [status] = useStatus()
         const projection = props.useProjection?.('modelSelection')
         const provider = (projection?.next ?? projection?.lastUsed)?.provider
         if (provider !== undefined && provider !== MINIMAX_PROVIDER_ID) return null
         // The balance may be hidden: a display choice, applied at once.
-        const [status] = useStatus()
         if (status?.showPill === false) return null
         return h(CreditPill, props)
       }

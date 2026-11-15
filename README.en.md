@@ -432,6 +432,13 @@ The plugin follows semantic versioning, and **each level means the same thing** 
 Every entry in the changelog opens with why it is that level, and with **what this release deliberately did not do** — the boundaries are worth knowing more than the features, so they come first.
 ## Changelog
 
+### 0.7.1 (2026-11-15)
+
+> The version is **patch**: two problems introduced in 0.7.0 are fixed. No new configuration key, no interface change.
+
+- **Fixed "the credit balance disappeared"**: wiring the display switch in 0.7.0 put `useStatus()` after the component's conditional return — React tracks hooks by call order, and a hook whose count differs between renders collapses the whole component in a real React. The collapse is what made the balance vanish. The hook now runs before any conditional return. **The lesson is pinned**: one case asserts the hook-before-return structure, and the balance is verified across the three-render sequence (shown, hidden by provider, back) that used to break. The harness here is a forgiving fake React and cannot reproduce the crash itself — the structural guard is the strongest pin available, and its comment says so honestly.
+- **Fixed "the diagnostics section looks wrong"**: it was a monospaced text dump, out of step with the rounded sub-cards around it. It now matches them: the same rounded box, spanning both columns, ordinary rows of label and value in the regular typeface; only the upstream's own words stay collapsed and monospaced — that is quoted evidence, not a style choice.
+
 ### 0.7.0 (2026-11-15)
 
 > The version is **minor**: a new "Diagnostics" section and a switch for showing the balance in the composer, and a different shape for the message a failed generation shows. **No interface change**; the meaning of the existing configuration keys is unchanged.
