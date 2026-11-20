@@ -198,6 +198,9 @@ function pickRegion(preferred: string | undefined): MinimaxRegion {
 /** How often the card may pull a fresh catalog. */
 const CATALOG_TTL_MS = 5 * 60 * 1000
 
+/** How often a catalog that is not live may be read again. */
+const CATALOG_RETRY_MS = 30 * 1000
+
 /**
  * How often the account's credit balance may be re-read.
  *
@@ -230,6 +233,8 @@ function apply(ctx: Context) {
   let region: MinimaxRegion = 'cn'
   let credential: Credential | undefined
   let lastCatalogAtMs = 0
+  /** When a catalog read was last attempted, live or not. */
+  let lastCatalogAttemptAtMs = 0
   let lastCreditAtMs = 0
   let lastSigninAtMs = 0
   let refreshing = false
@@ -399,14 +404,46 @@ function apply(ctx: Context) {
   /** Refresh the catalog at most once per TTL, never blocking a request. */
   const refreshCatalog = async (current: Credential): Promise<void> => {
     const now = Date.now()
-    if (refreshing || now - lastCatalogAtMs < CATALOG_TTL_MS) return
+    if (refreshing) return
+    // A live list is trusted for the TTL: the upstream rarely changes it, and
+    // re-reading it costs a request each time.
+    if (catalog.source === 'live' && now - lastCatalogAtMs < CATALOG_TTL_MS) return
+    // A list that is not live may be re-read, but not on every poll: a
+    // broken upstream would otherwise be asked over and over. The interval is
+    // shorter than the TTL because the whole point is to recover while the
+    // session lasts.
+    if (now - lastCatalogAttemptAtMs < CATALOG_RETRY_MS) return
     refreshing = true
+    lastCatalogAttemptAtMs = now
     try {
       await catalog.refresh(region, current)
-      lastCatalogAtMs = Date.now()
+      // Only a successful read is trusted for the TTL.
+      if (catalog.source === 'live') lastCatalogAtMs = Date.now()
     } finally {
       refreshing = false
     }
+  }
+
+  /**
+   * Bring the catalog up to date in the background.
+   *
+   * The catalog is otherwise read once, at start. A fetch that failed then —
+   * a network blip, a credential that was not ready yet — left the built-in
+   * list in place for the whole session, with no second attempt and no
+   * reason to show. The card polls the status often, so this is where the
+   * retry belongs: it never waits for the answer, and the interval in
+   * {@link refreshCatalog} keeps it from turning a poll into a request storm.
+   */
+  const scheduleCatalogRefresh = (): void => {
+    void (async () => {
+      const current = await readNow()
+      if (current === undefined) return
+      region = pickRegion(undefined)
+      await refreshCatalog(current)
+    })().catch(() => {
+      // A failed retry leaves the fallback in place and the reason recorded;
+      // the next poll tries again.
+    })
   }
 
   /**
@@ -802,6 +839,10 @@ function apply(ctx: Context) {
     // and the sign-in state below has to describe what is left afterwards.
     await refreshCredits()
     await refreshSignin()
+    // The catalog is refreshed in the background: the answer here is about
+    // what is known now, and the retry that may improve it should not make
+    // the card wait for a network round trip.
+    scheduleCatalogRefresh()
     return statusDocument({
       auth: await buildAuthStatus(),
       region,

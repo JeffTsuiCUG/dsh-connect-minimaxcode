@@ -432,6 +432,14 @@ The plugin follows semantic versioning, and **each level means the same thing** 
 Every entry in the changelog opens with why it is that level, and with **what this release deliberately did not do** — the boundaries are worth knowing more than the features, so they come first.
 ## Changelog
 
+### 0.7.2 (2026-11-20)
+
+> The version is **patch**: "the model catalog stayed on the built-in list and could not say why" is fixed. No new configuration key, no interface change.
+
+- **Fixed "the catalog was read once"**: the model catalog used to be read **only when the plugin started**. If the credential was not ready at that moment — the desktop app had not written its file yet, or the token was being renewed — the read never happened and the built-in list was served **for the whole session**, with no second attempt and no reason to show. Every status read now brings the catalog up to date in the background (with an interval, so a poll never becomes a request storm), and it recovers as soon as the credential is there.
+- **The trust interval and the retry interval are now separate**: a **live** list is trusted for five minutes (the upstream rarely changes it and re-reading costs a request); a list that is **not** live may be re-read every thirty seconds — the retry used to be blocked by the trust interval as well, which amounted to never retrying.
+- **The reason for a failure is no longer wiped by the very call that needed it**: the fallback is installed first and the reason written after; the other order let the call that replaced the snapshot take the reason with it.
+
 ### 0.7.1 (2026-11-15)
 
 > The version is **patch**: two problems introduced in 0.7.0 are fixed. No new configuration key, no interface change.

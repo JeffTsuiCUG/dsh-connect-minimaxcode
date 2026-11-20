@@ -339,8 +339,14 @@ export class MinimaxCatalog {
         this.set(models, 'live', Date.now())
       } catch (error) {
         // Keep serving whatever we had; only record why the refresh failed.
-        this.#snapshot.error = error instanceof Error ? error.message : String(error)
+        //
+        // The reason is written *after* the fallback is installed: installing
+        // it replaces the whole snapshot, so a reason written before would go
+        // with it whenever that call actually replaces — which it does
+        // whenever the served list is not already the built-in one. A
+        // failure nobody can read is a failure nobody can act on.
         if (this.#snapshot.source !== 'live') this.set(FALLBACK_MODELS, 'fallback')
+        this.#snapshot.error = error instanceof Error ? error.message : String(error)
       }
     })()
     try {
