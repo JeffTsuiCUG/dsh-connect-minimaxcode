@@ -29,6 +29,13 @@ import {
 import { MinimaxCatalog } from './catalog.ts'
 import { createMinimaxCodeAdapter } from './adapter.ts'
 import { imageInputHooks } from './image-input.ts'
+import {
+  DEFAULT_IMAGE_AREA,
+  DEFAULT_IMAGE_ASPECT_RATIO,
+  materializeGeneratedImages,
+  normalizeAspectRatio,
+  normalizeImageArea,
+} from './image-model.ts'
 import { cooldownFor } from './failure.ts'
 import { MINIMAX_ACTION_PATH, MINIMAX_CAPABILITY_PATH, MINIMAX_GENERATE_PATH, MINIMAX_STATUS_PATH, isLoopback, statusDocument, type CreditStatus, type DiagnosticsStatus, type PlanStatus, type RateLimitStatus, type StatusDeps, type UsageStatus, type UsageProfileStatus, type SigninStatus, type LoginStatus } from './status-route.ts'
 import {
@@ -155,6 +162,27 @@ export type { AuthState, Credential, MinimaxRegion, TokenClaims } from './auth.t
 export { MINIMAX_ACTION_PATH, MINIMAX_STATUS_PATH, statusDocument } from './status-route.ts'
 export type { StatusDocument } from './status-route.ts'
 export { MINIMAX_STREAM_IDLE_TIMEOUT_MS, createMinimaxCodeAdapter } from './adapter.ts'
+export {
+  DEFAULT_IMAGE_AREA,
+  DEFAULT_IMAGE_ASPECT_RATIO,
+  IMAGE_MODEL_SPECS,
+  MINIMAX_IMAGES_DIRNAME,
+  buildAuxiliaryReply,
+  detectAuxiliaryPurpose,
+  extractImagePrompt,
+  formatImageResponseMarkdown,
+  isImageGenerationModel,
+  listImageModels,
+  materializeGeneratedImages,
+  normalizeAspectRatio,
+  normalizeImageArea,
+  parseImagePromptDirectives,
+  resolveCanonicalImageModelId,
+  resolveImageModelInfo,
+  saveImageToLocalDir,
+  streamImageModelCall,
+  stripInjectedBlocks,
+} from './image-model.ts'
 
 /** Loader entry name; also the id the bundle patch inserts. */
 /**
@@ -797,6 +825,38 @@ function apply(ctx: Context) {
       // moment worth re-reading it.
       void refreshCredits()
     },
+    imageGeneration: {
+      getDefaults: () => ({
+        aspectRatio: normalizeAspectRatio(pluginState.imageAspectRatio) ?? DEFAULT_IMAGE_ASPECT_RATIO,
+        area: normalizeImageArea(pluginState.imageArea) ?? DEFAULT_IMAGE_AREA,
+      }),
+      execute: async (request) => {
+        try {
+          const apiKey = await resolvePlanApiKey()
+          const result = await generateImages({
+            apiKey,
+            region,
+            prompt: request.prompt,
+            model: request.model,
+            aspectRatio: request.aspectRatio,
+            area: request.area,
+            count: request.count,
+          })
+          return await materializeGeneratedImages(result, {
+            download: (url) => downloadImage(url),
+            saveAttachment: (bytes, mediaType) => saveGeneratedImage(bytes, mediaType),
+          })
+        } catch (error) {
+          if (error instanceof GenerationError) {
+            lastUpstreamError = error.verdict.upstream?.message ?? error.message
+            if (error.verdict.kind === 'credentials') {
+              planApiKey = undefined
+            }
+          }
+          throw error
+        }
+      },
+    },
   })
 
   // No disposer is kept: `registerAdapter` releases its routes with the fiber
@@ -860,6 +920,10 @@ function apply(ctx: Context) {
       capability,
       diagnostics: await buildDiagnostics(),
       showPill: pluginState.showPill ?? true,
+      imageDefaults: {
+        aspectRatio: normalizeAspectRatio(pluginState.imageAspectRatio) ?? DEFAULT_IMAGE_ASPECT_RATIO,
+        area: normalizeImageArea(pluginState.imageArea) ?? DEFAULT_IMAGE_AREA,
+      },
       generation: {
         imageModels: [...IMAGE_MODELS],
         imageAspectRatios: [...IMAGE_ASPECT_RATIOS],
@@ -959,6 +1023,23 @@ function apply(ctx: Context) {
         pluginState = { ...pluginState, showPill }
         await writePluginState(pluginState)
         return { ok: true, showPill }
+      }
+      case 'imageOptions': {
+        const nextAspect = body.aspectRatio === undefined
+          ? (normalizeAspectRatio(pluginState.imageAspectRatio) ?? DEFAULT_IMAGE_ASPECT_RATIO)
+          : normalizeAspectRatio(body.aspectRatio)
+        if (nextAspect === undefined) {
+          return { ok: false, error: '不支持的画幅比例' }
+        }
+        const nextArea = body.area === undefined
+          ? (normalizeImageArea(pluginState.imageArea) ?? DEFAULT_IMAGE_AREA)
+          : normalizeImageArea(body.area)
+        if (nextArea === undefined) {
+          return { ok: false, error: '不支持的清晰度' }
+        }
+        pluginState = { ...pluginState, imageAspectRatio: nextAspect, imageArea: nextArea }
+        await writePluginState(pluginState)
+        return { ok: true, aspectRatio: nextAspect, area: nextArea }
       }
       case 'settings': {
         const autoCheckin = body.autoCheckin

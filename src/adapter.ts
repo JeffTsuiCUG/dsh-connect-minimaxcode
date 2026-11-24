@@ -20,6 +20,14 @@ import { resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { MinimaxCatalog, CatalogModel } from './catalog.ts'
 import { MINIMAXCODE_PROVIDER_ID } from './catalog.ts'
 import { chatBaseUrl, type Credential, type MinimaxRegion, INERT_AUTH } from './auth.ts'
+import {
+  isImageGenerationModel,
+  listImageModels,
+  resolveCanonicalImageModelId,
+  resolveImageModelInfo,
+  streamImageModelCall,
+  type ImageStreamBridgeOptions,
+} from './image-model.ts'
 import type { ModelUsage } from './usage.ts'
 
 /** How long a silent stream may last before the transport gives up. */
@@ -131,6 +139,12 @@ export interface AdapterOptions {
   resolveAttachments?: PiAiAdapterOptions['resolveAttachments']
   /** Bridge one attachment into the current tool execution world. */
   resolveImageAccess?: PiAiAdapterOptions['resolveImageAccess']
+  /**
+   * Optional direct image-generation bridge. When supplied, H3 image models
+   * are advertised in DSH's model picker and intercepted before reaching the
+   * text chat gateway.
+   */
+  imageGeneration?: ImageStreamBridgeOptions
 }
 
 /** What {@link createMinimaxCodeAdapter} hands back. */
@@ -157,12 +171,18 @@ export interface AdapterBundle {
  */
 class MeteredAdapter extends LlmAdapter {
   readonly #inner: PiAiAdapter
-  readonly #onUsage: (model: string, usage: ModelUsage) => void
+  readonly #onUsage?: (model: string, usage: ModelUsage) => void
+  readonly #imageGeneration?: ImageStreamBridgeOptions
 
-  constructor(inner: PiAiAdapter, onUsage: (model: string, usage: ModelUsage) => void) {
+  constructor(
+    inner: PiAiAdapter,
+    onUsage?: (model: string, usage: ModelUsage) => void,
+    imageGeneration?: ImageStreamBridgeOptions,
+  ) {
     super()
     this.#inner = inner
     this.#onUsage = onUsage
+    this.#imageGeneration = imageGeneration
   }
 
   providerInfo(provider: string): LlmProviderInfo {
@@ -173,26 +193,46 @@ class MeteredAdapter extends LlmAdapter {
     return this.#inner.providerRetryPolicy(provider)
   }
 
-  listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return this.#inner.listModels(provider)
+  async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
+    const models = await this.#inner.listModels(provider)
+    if (this.#imageGeneration === undefined) return models
+    const existing = new Set(models.map(entry => entry.id.toLowerCase()))
+    const extras = listImageModels(provider).filter(entry => !existing.has(entry.id.toLowerCase()))
+    return [...models, ...extras]
   }
 
   resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
+    if (this.#imageGeneration !== undefined && isImageGenerationModel(model)) {
+      return Promise.resolve(resolveImageModelInfo(provider, model))
+    }
     return this.#inner.resolveModel(provider, model, signal)
   }
 
   async prepareCall(provider: string, model: string, signal?: AbortSignal): Promise<PreparedAdapterCall> {
+    if (this.#imageGeneration !== undefined && isImageGenerationModel(model)) {
+      const bridge = this.#imageGeneration
+      const canonical = resolveCanonicalImageModelId(model) ?? model
+      return {
+        model: resolveImageModelInfo(provider, canonical),
+        stream: (options: GenerateOptions) => this.#metered(streamImageModelCall(options, bridge), canonical),
+      }
+    }
     const prepared = await this.#inner.prepareCall(provider, model, signal)
     return { ...prepared, stream: (options: GenerateOptions) => this.#metered(prepared.stream(options), model) }
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (this.#imageGeneration !== undefined && isImageGenerationModel(options.model)) {
+      const canonical = resolveCanonicalImageModelId(options.model) ?? options.model
+      return this.#metered(streamImageModelCall(options, this.#imageGeneration), canonical)
+    }
     return this.#metered(this.#inner.stream(options), options.model)
   }
 
   /** Copy the usage out of a stream, leaving the stream itself untouched. */
   #metered(chunks: AsyncIterable<StreamChunk>, model: string): AsyncIterable<StreamChunk> {
     const onUsage = this.#onUsage
+    if (onUsage === undefined) return chunks
     return {
       async *[Symbol.asyncIterator]() {
         for await (const chunk of chunks) {
@@ -285,9 +325,9 @@ export function createMinimaxCodeAdapter(options: AdapterOptions): AdapterBundle
     ...options.resolveAttachments === undefined ? {} : { resolveAttachments: options.resolveAttachments },
     ...options.resolveImageAccess === undefined ? {} : { resolveImageAccess: options.resolveImageAccess },
   })
-  const adapter = options.onUsage === undefined
+  const adapter = options.onUsage === undefined && options.imageGeneration === undefined
     ? inner
-    : new MeteredAdapter(inner, options.onUsage)
+    : new MeteredAdapter(inner, options.onUsage, options.imageGeneration)
   return {
     adapter,
     invalidate: () => {

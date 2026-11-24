@@ -402,7 +402,7 @@ GET  https://api.minimax.cn/v2/query/video_generation/{id}  # 轮询任务
 
 #### 与桌面 App 的两处不同（实测所限，如实说明）
 
-1. **不能像普通模型那样出现在模型选择器里。** DSH 宿主的 `ctx.llm` 只有对话适配器这一个注册点（`registerAdapter`），没有图像 provider 的挂载处；模型描述符 `LlmModelInfo` 也没有「输出模态」字段，选择器无从区分图像模型。pi-ai 自己虽有图像生成 API（`ImagesProvider` / `generateImages`），但 DSH 从不构造 `ImagesModels`，插件自己 `new` 一个也没有人会读。这三点都是宿主层面的事，插件改不动。
+1. **模型选择器通过对话适配器桥接生图。** DSH 宿主的 `ctx.llm` 仍只有对话适配器注册点（`registerAdapter`），没有原生的图像输出模态。本插件通过在 `LlmAdapter` 层暴露非推理的 `MiniMax-H3-Image` / `MiniMax-H3-Image-Highspeed` 条目并拦截对应请求来支持直接在模型选择器中生图：自动从消息记录提取用户提示词（过滤插件/框架上下文）、拦截会话标题与压缩等辅助请求（避免误扣费）、下载图片落盘至 `~/.dsh/minimax-images/` 并以 Markdown 预览返回；选中 H3 生图模型时，输入框工具栏会显示画幅与清晰度（1K / 2K / 4K）切换胶囊，也支持在提示词内用 `--ar 16:9` / `--2k` / `--n 2` 单次覆盖。原插件页与输入框「生成」面板继续保留。
 2. **视频在 DSH 侧目前没有承载。** `pi-ai`、`dsh-llm`、`dsh-attachment`、`dsh-llm-pi-ai` 四个包里关于 video 的声明各为零处 —— 没有视频内容块、没有附件媒体类型、没有渲染。视频因此只能生成后在面板里播放与下载，不能像图片那样进对话。
 
 图片进对话是可行的：宿主公开了 `ctx.attachments.admitPromptContent()`，插件可以独立完成「生成 → 落库 → 拿到持久引用」；但附件入口是浏览器 `File` 上传，**没有附件库**可供挑选，因此要进对话仍需作为下一轮 prompt 的一部分提交。这一步已由 0.6.1 完成（见下）。

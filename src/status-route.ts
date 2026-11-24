@@ -265,6 +265,8 @@ export interface StatusDocument {
   diagnostics?: DiagnosticsStatus
   /** Whether the balance is drawn beside the composer. */
   showPill?: boolean
+  /** Active default options for direct H3 image-model calls in the model picker. */
+  imageDefaults?: { aspectRatio: string; area: string }
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -307,6 +309,8 @@ export interface StatusDeps {
   diagnostics?: DiagnosticsStatus
   /** Whether the balance is drawn beside the composer. */
   showPill?: boolean
+  /** Active default options for direct H3 image-model calls in the model picker. */
+  imageDefaults?: { aspectRatio: string; area: string }
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions
   /** What the host offered the card the last time it looked. */
@@ -352,6 +356,7 @@ export function statusDocument(deps: StatusDeps): StatusDocument {
     ...deps.plan === undefined ? {} : { plan: deps.plan },
     ...deps.diagnostics === undefined ? {} : { diagnostics: deps.diagnostics },
     ...deps.showPill === undefined ? {} : { showPill: deps.showPill },
+    ...deps.imageDefaults === undefined ? {} : { imageDefaults: deps.imageDefaults },
     ...deps.capability === undefined ? {} : { capability: deps.capability },
     ...deps.generation === undefined ? {} : { generation: deps.generation },
   }
