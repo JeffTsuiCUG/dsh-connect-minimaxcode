@@ -1,5 +1,5 @@
 import "@earendil-works/pi-ai";
-import { LlmAdapter } from "@deepseek-ai/dsh-llm";
+import { GenerateOptions, LlmAdapter, LlmModelInfo, LlmResolvedModelInfo, Message, StreamChunk } from "@deepseek-ai/dsh-llm";
 import { PiAiAdapterOptions } from "@deepseek-ai/dsh-llm-pi-ai";
 import { Context } from "@deepseek-ai/cordis";
 //#region src/auth.d.ts
@@ -728,6 +728,10 @@ interface PluginState {
    * once, with no draft to save — see the note on the settings below.
    */
   showPill?: boolean;
+  /** Preferred default aspect ratio for direct image-model calls. */
+  imageAspectRatio?: string;
+  /** Preferred default output area (`1K`/`2K`/`4K`) for direct image-model calls. */
+  imageArea?: string;
   /** The day the last claim happened, in the account's time zone. */
   lastClaimDay?: string;
   /** When the last claim happened, in milliseconds since the epoch. */
@@ -1173,6 +1177,11 @@ interface StatusDocument {
   diagnostics?: DiagnosticsStatus;
   /** Whether the balance is drawn beside the composer. */
   showPill?: boolean;
+  /** Active default options for direct H3 image-model calls in the model picker. */
+  imageDefaults?: {
+    aspectRatio: string;
+    area: string;
+  };
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
   /** What the host offered the card the last time it looked. */
@@ -1218,6 +1227,11 @@ interface StatusDeps {
   diagnostics?: DiagnosticsStatus;
   /** Whether the balance is drawn beside the composer. */
   showPill?: boolean;
+  /** Active default options for direct H3 image-model calls in the model picker. */
+  imageDefaults?: {
+    aspectRatio: string;
+    area: string;
+  };
   /** The choices the generation endpoints offer. */
   generation?: GenerationOptions;
   /** What the host offered the card the last time it looked. */
@@ -1236,6 +1250,155 @@ interface StatusDeps {
  * a different next step than one whose token simply aged out.
  */
 declare function statusDocument(deps: StatusDeps): StatusDocument;
+//#endregion
+//#region src/generation.d.ts
+/** The image models the endpoint serves. */
+declare const IMAGE_MODELS: readonly ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"];
+/** One generated image, as the endpoint reports it. */
+interface GeneratedImage {
+  /** Where the image is, valid for 24 hours. */
+  url?: string;
+  /** The image's bytes, when the endpoint was asked for them inline. */
+  bytes?: Uint8Array;
+  /** The media type of the bytes. */
+  mediaType?: string;
+  /** The size the endpoint actually produced, "宽x高". */
+  size?: string;
+  /** The prompt actually used, after the server's own enhancement. */
+  revisedPrompt?: string;
+}
+/** What one image request produced. */
+interface ImageGenerationResult {
+  /** The images, in the order the endpoint returned them. */
+  images: GeneratedImage[];
+  /** How many were generated, as the endpoint counted them. */
+  generatedImages?: number;
+  /** Total tokens the generation used, when the endpoint reported them. */
+  totalTokens?: number;
+  /** The endpoint's own request id, useful when something went wrong. */
+  requestId?: string;
+}
+//#endregion
+//#region src/image-model.d.ts
+/** Canonical metadata for each MiniMax H3 image generation model. */
+interface ImageModelSpec {
+  readonly id: (typeof IMAGE_MODELS)[number];
+  readonly name: string;
+  readonly description: string;
+}
+declare const IMAGE_MODEL_SPECS: readonly ImageModelSpec[];
+declare const DEFAULT_IMAGE_ASPECT_RATIO = "auto";
+declare const DEFAULT_IMAGE_AREA = "1K";
+/** Local directory name under `dshHome()` for persisted generated images. */
+declare const MINIMAX_IMAGES_DIRNAME = "minimax-images";
+/** Resolve a model id to one of the canonical H3 image model ids, if it matches. */
+declare function resolveCanonicalImageModelId(model: string | undefined): ImageModelSpec['id'] | undefined;
+/** Whether `model` targets one of the MiniMax H3 image generation models. */
+declare function isImageGenerationModel(model: string | undefined): boolean;
+/** Model descriptors advertised in DSH's model picker. */
+declare function listImageModels(provider: string): LlmModelInfo[];
+/** Resolved metadata for one exact image model route (non-reasoning). */
+declare function resolveImageModelInfo(provider: string, model: string): LlmResolvedModelInfo;
+/** Remove framework-injected XML blocks that may ride inside a user message. */
+declare function stripInjectedBlocks(text: string): string;
+/**
+ * Detect host auxiliary requests (session title generation, compaction) so
+ * selecting an image model for a new session never spends image quota on a
+ * title call.
+ */
+declare function detectAuxiliaryPurpose(options: GenerateOptions): 'session-title' | 'compaction' | undefined;
+/**
+ * Extract the real user prompt from a DSH conversation transcript.
+ *
+ * Prefers messages explicitly tagged `source.kind === 'user'`, which excludes
+ * plugin-injected context (`source.kind === 'plugin'`) and tool results
+ * (`source.kind === 'tool'`). Falls back to content heuristics when a caller
+ * constructs messages without `source`.
+ */
+declare function extractImagePrompt(messages: readonly Message[] | undefined): string;
+/** Parsed prompt plus effective image generation parameters. */
+interface ParsedImageRequest {
+  prompt: string;
+  aspectRatio: string;
+  area: string;
+  count: number;
+}
+/** Validate an aspect ratio against MiniMax H3's supported list. */
+declare function normalizeAspectRatio(value: unknown): string | undefined;
+/** Validate an output area (`1K` / `2K` / `4K`) against MiniMax H3's list. */
+declare function normalizeImageArea(value: unknown): string | undefined;
+/**
+ * Parse optional inline directives (`--ar 16:9`, `--2k`, `--area 4K`, `--n 2`)
+ * out of a user's prompt while keeping defaults from the composer pill.
+ */
+declare function parseImagePromptDirectives(rawPrompt: string, defaults?: {
+  aspectRatio?: string;
+  area?: string;
+}): ParsedImageRequest;
+/** Build a short text reply for auxiliary host requests without generating images. */
+declare function buildAuxiliaryReply(purpose: 'session-title' | 'compaction', options: GenerateOptions): string;
+/** Persist generated image bytes under `~/.dsh/minimax-images/`. */
+declare function saveImageToLocalDir(bytes: Uint8Array, mediaType: string, index: number, options?: {
+  dir?: string;
+  now?: Date;
+  env?: NodeJS.ProcessEnv;
+}): Promise<string>;
+/** One materialized generated image ready for Markdown output. */
+interface MaterializedImage {
+  /** Local file path on disk, when saving succeeded. */
+  localPath?: string;
+  /** Fallback remote URL, when local save failed. */
+  url?: string;
+  size?: string;
+  revisedPrompt?: string;
+}
+/** Format generated images and metadata into Markdown rendered by DSH chat. */
+declare function formatImageResponseMarkdown(params: {
+  model: string;
+  aspectRatio: string;
+  area: string;
+  images: readonly MaterializedImage[];
+  totalTokens?: number;
+}): string;
+/** One completed image generation handled by the plugin host layer. */
+interface ImageModelRunResult {
+  images: MaterializedImage[];
+  totalTokens?: number;
+  requestId?: string;
+}
+/** Host callback invoked when an image model is called from the model picker. */
+type ImageModelExecutor = (request: {
+  model: ImageModelSpec['id'];
+  prompt: string;
+  aspectRatio: string;
+  area: string;
+  count: number;
+  signal?: AbortSignal;
+}) => Promise<ImageModelRunResult>;
+/** Options for streaming an image generation call through `LlmAdapter`. */
+interface ImageStreamBridgeOptions {
+  /** Read current default aspect ratio and output area. */
+  getDefaults: () => {
+    aspectRatio: string;
+    area: string;
+  };
+  /** Execute the actual MiniMax H3 image generation and persistence. */
+  execute: ImageModelExecutor;
+}
+/**
+ * Helper to turn raw `generateImages` output into persisted local files plus
+ * optional DSH attachment copies.
+ */
+declare function materializeGeneratedImages(result: ImageGenerationResult, deps: {
+  download: (url: string) => Promise<{
+    bytes: Uint8Array;
+    mediaType: string;
+  }>;
+  saveAttachment?: (bytes: Uint8Array, mediaType: string) => Promise<unknown>;
+  saveLocal?: (bytes: Uint8Array, mediaType: string, index: number) => Promise<string>;
+}): Promise<ImageModelRunResult>;
+/** Stream one model-picker request targeted at a MiniMax H3 image model. */
+declare function streamImageModelCall(options: GenerateOptions, bridge: ImageStreamBridgeOptions): AsyncIterable<StreamChunk>;
 //#endregion
 //#region src/adapter.d.ts
 /** How long a silent stream may last before the transport gives up. */
@@ -1270,6 +1433,12 @@ interface AdapterOptions {
   resolveAttachments?: PiAiAdapterOptions['resolveAttachments'];
   /** Bridge one attachment into the current tool execution world. */
   resolveImageAccess?: PiAiAdapterOptions['resolveImageAccess'];
+  /**
+   * Optional direct image-generation bridge. When supplied, H3 image models
+   * are advertised in DSH's model picker and intercepted before reaching the
+   * text chat gateway.
+   */
+  imageGeneration?: ImageStreamBridgeOptions;
 }
 /** What {@link createMinimaxCodeAdapter} hands back. */
 interface AdapterBundle {
@@ -1309,4 +1478,4 @@ declare const inject: string[];
  */
 declare function apply(ctx: Context): void;
 //#endregion
-export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PlanSummary, type PluginCredential, type PluginState, REMAINS_PERCENT_PATH, type RateLimitWindows, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, deletePluginCredential, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, fetchCreditSummary, fetchMembershipDocument, fetchRateLimitWindows, fetchSigninPanel, inject, localDay, makePkce, name, parseAuthDocument, parseCatalog, parseCreditSummary, parseOAuthDocument, parsePlanSummary, parseRateLimitWindows, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, startDeviceLogin, statusDocument, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };
+export { type AuthState, type CatalogModel, type CatalogSource, type Credential, type CreditSummary, DEFAULT_IMAGE_AREA, DEFAULT_IMAGE_ASPECT_RATIO, DEVICE_CODE_GRANT, DEVICE_CODE_PATH, type DeviceLoginState, EMPTY_USAGE, FALLBACK_MODELS, IMAGE_MODEL_SPECS, MEMBERSHIP_PATH, MINIMAXCODE_PROVIDER_ID, MINIMAX_ACTION_PATH, MINIMAX_AUTH_FILENAME, MINIMAX_DATA_DIR, MINIMAX_GATEWAYS, MINIMAX_IMAGES_DIRNAME, MINIMAX_OAUTH_CLIENT_ID, MINIMAX_REGIONS, MINIMAX_STATUS_PATH, MINIMAX_STREAM_IDLE_TIMEOUT_MS, MODEL_PRICES, MinimaxCatalog, MinimaxCredits, type MinimaxRegion, type ModelUsage, type OAuthCredential, type OAuthState, PLUGIN_CREDENTIAL_FILENAME, PLUGIN_STATE_FILENAME, type PlanSummary, type PluginCredential, type PluginState, REMAINS_PERCENT_PATH, type RateLimitWindows, SIGNIN_CLAIM_PATH, SIGNIN_CLAIM_RESULT, SIGNIN_CYCLE_DAYS, SIGNIN_DAY_STATUS, SIGNIN_PANEL_PATH, type SigninClaim, type SigninDay, type SigninPanel, type StatusDocument, type TokenClaims, UsageMeter, apply, authPath, bearerToken, buildAuxiliaryReply, catalogUrl, chatBaseUrl, claimSignin, createMinimaxCodeAdapter, dataDir, daysRemaining, decodeClaims, deletePluginCredential, detectAuxiliaryPurpose, dshHome, ensureOAuthCredential, estimateCny, expiresInMs, expiryLevel, extractImagePrompt, fetchCreditSummary, fetchMembershipDocument, fetchRateLimitWindows, fetchSigninPanel, formatImageResponseMarkdown, inject, isImageGenerationModel, listImageModels, localDay, makePkce, materializeGeneratedImages, name, normalizeAspectRatio, normalizeImageArea, parseAuthDocument, parseCatalog, parseCreditSummary, parseImagePromptDirectives, parseOAuthDocument, parsePlanSummary, parseRateLimitWindows, parseSigninClaim, parseSigninPanel, pluginCredentialPath, pluginStatePath, pollDeviceLogin, priceFor, readCredential, readOAuthCredential, readPluginCredential, readPluginState, refreshOAuthCredential, refreshPluginCredential, resolveCanonicalImageModelId, resolveImageModelInfo, saveImageToLocalDir, startDeviceLogin, statusDocument, streamImageModelCall, stripInjectedBlocks, timezoneId, writeOAuthCredential, writePluginCredential, writePluginState };

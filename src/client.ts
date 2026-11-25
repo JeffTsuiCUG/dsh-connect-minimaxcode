@@ -21,9 +21,9 @@ interface ModuleLoader {
 /** What the host's model-selection projection reports. */
 interface ModelSelection {
   /** The selection the next request will use, when the picker has written one. */
-  next?: { provider?: string }
+  next?: { provider?: string; model?: string }
   /** The selection the previous request used, before `next` was written. */
-  lastUsed?: { provider?: string }
+  lastUsed?: { provider?: string; model?: string }
 }
 
 /** The props the host's slots hand to a registered component. */
@@ -165,6 +165,8 @@ interface StatusDocument {
   diagnostics?: DiagnosticsStatus
   /** Whether the balance is drawn beside the composer. */
   showPill?: boolean
+  /** Active default aspect ratio and output area for direct image-model calls. */
+  imageDefaults?: { aspectRatio: string; area: string }
   usageProfile?: {
     state: 'ok' | 'unavailable'
     totalDays?: number
@@ -382,6 +384,10 @@ interface GenerationFailure {
     generateNoPrompt: '当前会话不支持发送消息。',
     generateNoDraft: '当前会话不支持草稿附件。',
     generateNoInput: '输入框不接受附件。',
+    imageOptionsTitle: 'H3 生图参数',
+    imageOptionsLabel: '画幅 {aspect} · {area}',
+    imageOptionsHint: '选定后即刻生效；也可在提示词里写 --ar 16:9 --2k --n 2 单次覆盖。',
+    imageOptionsSaveFailed: '保存生图参数失败',
   }
   const en: Record<string, string> = {
     title: 'MiniMax Code',
@@ -489,6 +495,10 @@ interface GenerationFailure {
     generateNoPrompt: 'This session cannot send messages.',
     generateNoDraft: 'This session cannot hold draft attachments.',
     generateNoInput: 'The input box does not take attachments.',
+    imageOptionsTitle: 'H3 Image Options',
+    imageOptionsLabel: 'Aspect {aspect} · {area}',
+    imageOptionsHint: 'Applies immediately; override per prompt with --ar 16:9 --2k --n 2.',
+    imageOptionsSaveFailed: 'Failed to save image options',
   }
 
   const loader = (globalThis as { __ModuleLoader__?: ModuleLoader }).__ModuleLoader__
@@ -993,6 +1003,121 @@ interface GenerationFailure {
         // The balance may be hidden: a display choice, applied at once.
         if (status?.showPill === false) return null
         return h(CreditPill, props)
+      }
+
+      const DEFAULT_ASPECT_RATIOS = ['auto', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16', '3:1', '1:3']
+      const DEFAULT_IMAGE_AREAS = ['1K', '2K', '4K']
+
+      /** Whether the selected model id targets a MiniMax H3 image model. */
+      function isImageModelId(model: string | undefined): boolean {
+        if (typeof model !== 'string' || model.trim().length === 0) return false
+        const slash = model.lastIndexOf('/')
+        const bare = (slash >= 0 ? model.slice(slash + 1) : model).trim().toLowerCase()
+        return bare === 'minimax-h3-image' || bare === 'minimax-h3-image-highspeed'
+      }
+
+      /** Composer popover for aspect ratio & resolution when an H3 image model is active. */
+      function ImageOptionsPill(props: SlotProps & { status?: StatusDocument; refresh?: () => void }) {
+        const [open, setOpen] = React.useState(false)
+        const [localAspect, setLocalAspect] = React.useState<string | undefined>(undefined)
+        const [localArea, setLocalArea] = React.useState<string | undefined>(undefined)
+        const [saving, setSaving] = React.useState(false)
+        const [error, setError] = React.useState<string | undefined>(undefined)
+        const t = props.t ?? ((key: string, params?: Record<string, unknown>) => {
+          const template = zh[key] ?? key
+          return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params?.[name] ?? ''))
+        })
+
+        const aspectOptions = props.status?.generation?.imageAspectRatios ?? DEFAULT_ASPECT_RATIOS
+        const areaOptions = props.status?.generation?.imageAreas ?? DEFAULT_IMAGE_AREAS
+        const aspect = localAspect ?? props.status?.imageDefaults?.aspectRatio ?? 'auto'
+        const area = localArea ?? props.status?.imageDefaults?.area ?? '1K'
+
+        const save = async (nextAspect: string, nextArea: string): Promise<void> => {
+          setLocalAspect(nextAspect)
+          setLocalArea(nextArea)
+          setSaving(true)
+          setError(undefined)
+          try {
+            const response = await fetch(`${ACTION_PATH}?action=imageOptions`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', accept: 'application/json' },
+              body: JSON.stringify({ aspectRatio: nextAspect, area: nextArea }),
+            })
+            const result = await response.json() as { ok?: boolean; error?: string }
+            if (!response.ok || result.ok !== true) {
+              setError(result.error ?? t('imageOptionsSaveFailed'))
+            } else {
+              props.refresh?.()
+            }
+          } catch {
+            setError(t('imageOptionsSaveFailed'))
+          } finally {
+            setSaving(false)
+          }
+        }
+
+        const selectField = (
+          label: string,
+          value: string,
+          options: string[],
+          onChange: (next: string) => void,
+          attr: string,
+        ) => h('div', { style: rowStyle },
+          h('span', null, label),
+          h('select', {
+            style: selectStyle,
+            value,
+            disabled: saving,
+            [attr]: true,
+            onChange: (event: { target: { value: string } }) => { onChange(event.target.value) },
+          }, ...options.map(option => h('option', { key: option, value: option }, option))),
+        )
+
+        const popover = h('div', { style: detailStyle, 'data-minimax-image-options-detail': true },
+          h('div', { style: detailFlowStyle },
+            h('div', { style: cardTitleStyle }, t('imageOptionsTitle')),
+            h('div', { style: boxStyle },
+              selectField(
+                t('generateAspect'),
+                aspect,
+                aspectOptions,
+                next => { void save(next, area) },
+                'data-minimax-aspect-select',
+              ),
+              selectField(
+                t('generateArea'),
+                area,
+                areaOptions,
+                next => { void save(aspect, next) },
+                'data-minimax-area-select',
+              ),
+            ),
+            h('div', { style: mutedStyle }, t('imageOptionsHint')),
+            error !== undefined ? h('div', { style: warnStyle }, error) : null,
+          ),
+        )
+
+        return h('div', { style: wrapStyle, 'data-minimax-image-options': true },
+          h('button', {
+            type: 'button',
+            style: buttonStyle,
+            title: t('imageOptionsTitle'),
+            onClick: () => { setOpen(!open) },
+          }, t('imageOptionsLabel', { aspect, area })),
+          open ? popover : null,
+        )
+      }
+
+      /** Gate that shows image options only when a MiniMax H3 image model is selected. */
+      function ImageOptionsGate(props: SlotProps) {
+        const [status, refresh] = useStatus()
+        const projection = props.useProjection?.('modelSelection')
+        const active = projection?.next ?? projection?.lastUsed
+        if (active?.provider !== MINIMAX_PROVIDER_ID || !isImageModelId(active?.model)) {
+          return null
+        }
+        return h(ImageOptionsPill, { ...props, status, refresh })
       }
 
       /**
@@ -1991,6 +2116,15 @@ interface GenerationFailure {
             // conversation a picture belongs to.
             inject: (sessionId?: string) => ({ t, sessionId }),
           }, GenerateDock))
+          // Aspect-ratio and resolution pill: visible only when an H3 image
+          // model is selected in the host's model picker.
+          context.slots.inject('conversation.input.left', () => context.slots.register({
+            name: 'conversation.input.left',
+            id: 'minimax-image-options',
+            order: 6,
+            locale: NAMESPACE,
+            inject: () => ({ t }),
+          }, ImageOptionsGate))
           // The plugin's own page, keyed by the package name, where the
           // balance and the expiry schedule are spelled out.
           context.slots.inject('plugins.bundle.config', () => context.slots.register({

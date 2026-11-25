@@ -86,6 +86,10 @@ export interface PluginState {
    * once, with no draft to save — see the note on the settings below.
    */
   showPill?: boolean
+  /** Preferred default aspect ratio for direct image-model calls. */
+  imageAspectRatio?: string
+  /** Preferred default output area (`1K`/`2K`/`4K`) for direct image-model calls. */
+  imageArea?: string
   /** The day the last claim happened, in the account's time zone. */
   lastClaimDay?: string
   /** When the last claim happened, in milliseconds since the epoch. */
@@ -208,6 +212,13 @@ export async function readPluginState(env: NodeJS.ProcessEnv = process.env): Pro
   return {
     schemaVersion: typeof record.schemaVersion === 'number' ? record.schemaVersion : 1,
     autoCheckin: record.autoCheckin === true,
+    ...(typeof record.showPill === 'boolean' ? { showPill: record.showPill } : {}),
+    ...(typeof record.imageAspectRatio === 'string' && record.imageAspectRatio.length > 0
+      ? { imageAspectRatio: record.imageAspectRatio }
+      : {}),
+    ...(typeof record.imageArea === 'string' && record.imageArea.length > 0
+      ? { imageArea: record.imageArea }
+      : {}),
     lastClaimDay: typeof record.lastClaimDay === 'string' ? record.lastClaimDay : undefined,
     lastClaimAtMs: typeof record.lastClaimAtMs === 'number' ? record.lastClaimAtMs : undefined,
     lastClaimPoints: typeof record.lastClaimPoints === 'number' ? record.lastClaimPoints : undefined,

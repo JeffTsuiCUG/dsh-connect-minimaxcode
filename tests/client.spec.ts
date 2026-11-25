@@ -186,21 +186,24 @@ describe('client bundle', () => {
     // The tool row, not the ambient strip below the composer: the balance
     // belongs beside the model picker that decides whose balance it is.
     expect(loaded.slotNames).toEqual([
-      'conversation.input.left', 'conversation.input.left', 'plugins.bundle.config',
+      'conversation.input.left', 'conversation.input.left', 'conversation.input.left', 'plugins.bundle.config',
     ])
-    expect(loaded.slots).toHaveLength(3)
-    // The balance readout and the image dock sit side by side in the tool row:
-    // both belong to the provider the picker has selected.
+    expect(loaded.slots).toHaveLength(4)
+    // The balance readout, image dock and image options pill sit side by side in the tool row:
+    // all belong to the provider the picker has selected.
     expect(loaded.slots[0]?.options.name).toBe('conversation.input.left')
     expect(loaded.slots[0]?.options.id).toBe('minimax-credits')
     expect(loaded.slots[0]?.options.order).toBe(4)
     expect(loaded.slots[1]?.options.name).toBe('conversation.input.left')
     expect(loaded.slots[1]?.options.id).toBe('minimax-generate')
     expect(loaded.slots[1]?.options.order).toBe(5)
+    expect(loaded.slots[2]?.options.name).toBe('conversation.input.left')
+    expect(loaded.slots[2]?.options.id).toBe('minimax-image-options')
+    expect(loaded.slots[2]?.options.order).toBe(6)
     // The page card is keyed by the package name, which is how the plugins
     // page finds the entry that belongs to this bundle.
-    expect(loaded.slots[2]?.options.name).toBe('plugins.bundle.config')
-    expect(loaded.slots[2]?.options.key).toBe('dsh-connect-minimaxcode')
+    expect(loaded.slots[3]?.options.name).toBe('plugins.bundle.config')
+    expect(loaded.slots[3]?.options.key).toBe('dsh-connect-minimaxcode')
   })
 
   it('injects the bound locale into every slot', () => {
@@ -228,7 +231,7 @@ describe('client bundle', () => {
     })
     // The composer and plugin-page slots carry no translator of their own,
     // so the bound one has to be injected into both.
-    expect(loaded.slots).toHaveLength(3)
+    expect(loaded.slots).toHaveLength(4)
     for (const slot of loaded.slots) {
       expect(typeof slot.options.inject).toBe('function')
       const props = slot.options.inject!()
@@ -541,5 +544,53 @@ describe('client bundle', () => {
     // a credit package has none, and the card says so rather than leaving the
     // reader to wonder whether a read failed.
     expect(tree).toContain('未订阅 M Plan')
+  })
+
+  it('shows the H3 image options pill only when an H3 image model is selected', async () => {
+    const loaded = loadClient({
+      ...STATUS,
+      imageDefaults: { aspectRatio: '16:9', area: '2K' },
+      generation: {
+        imageModels: ['MiniMax-H3-Image', 'MiniMax-H3-Image-Highspeed'],
+        imageAspectRatios: ['auto', '16:9', '1:1'],
+        imageAreas: ['1K', '2K', '4K'],
+        videoDurations: [5],
+        videoResolutions: ['768P'],
+        videoRatios: ['16:9'],
+      },
+    })
+    const harness = reactHarness()
+    let optionsSlot: ((props: unknown) => unknown) | undefined
+    loaded.registrations[0]!.factory(() => harness.react).apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: { id?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.id === 'minimax-image-options') optionsSlot = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    expect(optionsSlot).toBeDefined()
+
+    // Hidden for text models or other providers.
+    expect(harness.render(optionsSlot!, {
+      useProjection: () => ({ next: { provider: 'minimaxcode', model: 'MiniMax-M3' } }),
+    })).toBeNull()
+    expect(harness.render(optionsSlot!, {
+      useProjection: () => ({ next: { provider: 'other', model: 'MiniMax-H3-Image' } }),
+    })).toBeNull()
+
+    // Shown when an H3 image model is active (including provider prefix).
+    const activeProps = {
+      useProjection: () => ({ next: { provider: 'minimaxcode', model: 'minimaxcode/MiniMax-H3-Image-Highspeed' } }),
+    }
+    const first = renderDeep(harness, optionsSlot!, activeProps)
+    expect(first).not.toBeNull()
+    await new Promise(resolve => setTimeout(resolve, 15))
+    const second = JSON.stringify(renderDeep(harness, optionsSlot!, activeProps))
+    expect(second).toContain('16:9')
+    expect(second).toContain('2K')
   })
 })
