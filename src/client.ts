@@ -182,9 +182,12 @@ interface StatusDocument {
     imageModels: string[]
     imageAspectRatios: string[]
     imageAreas: string[]
+    videoModels?: string[]
     videoDurations: number[]
     videoResolutions: string[]
     videoRatios: string[]
+    /** What each video model accepts, keyed by model id. */
+    videoModelOptions?: Record<string, { durations: number[]; resolutions: string[]; ratios: string[] }>
   }
   signin?: {
     state: 'ok' | 'unavailable'
@@ -1561,6 +1564,7 @@ interface GenerationFailure {
         const [model, setModel] = React.useState('')
         const [aspect, setAspect] = React.useState('auto')
         const [area, setArea] = React.useState('4K')
+        const [videoModelChosen, setVideoModel] = React.useState('')
         const [duration, setDuration] = React.useState(5)
         const [resolution, setResolution] = React.useState('2K')
         const [ratio, setRatio] = React.useState('16:9')
@@ -1570,6 +1574,33 @@ interface GenerationFailure {
         const [video, setVideo] = React.useState<{ url: string; status?: string } | undefined>(undefined)
 
         const imageModels = options?.imageModels ?? ['MiniMax-H3-Image']
+
+        // The video models do not accept the same lengths, resolutions or
+        // ratios, and which model an account may use at all is the plan's
+        // decision. So the lists below follow the chosen model rather than a
+        // single global set: offering a combination that is certain to be
+        // refused only spends the reader's time.
+        const videoModels = options?.videoModels ?? ['MiniMax-H3-Max', 'MiniMax-H3']
+        const videoModel = videoModelChosen === '' ? videoModels[0]! : videoModelChosen
+        const videoLimits = options?.videoModelOptions?.[videoModel]
+        const videoDurations = videoLimits?.durations ?? options?.videoDurations ?? [5, 10]
+        const videoResolutions = videoLimits?.resolutions ?? options?.videoResolutions ?? ['768P', '2K']
+        // A choice that belonged to the previous model (or to the previous
+        // resolution) stops being valid when either changes: `2K` is offered
+        // for `MiniMax-H3` and not for `MiniMax-H3-Max`. Rather than posting a
+        // combination the endpoint will refuse, the posted value falls back to
+        // the first one still offered, and the control shows what it sends.
+        const chosenDuration = videoDurations.includes(duration) ? duration : videoDurations[0]!
+        const chosenResolution = videoResolutions.includes(resolution) ? resolution : videoResolutions[0]!
+
+        // `720P` accepts only the two wide ratios, so the list follows the
+        // resolution that will actually be posted: the stored choice may have
+        // been narrowed away a moment ago, and reading it here would offer
+        // ratios that `720P` answers with "only supports ratio 16:9 or 9:16".
+        const videoRatios = chosenResolution === '720P'
+          ? ['16:9', '9:16']
+          : (videoLimits?.ratios ?? options?.videoRatios ?? ['16:9', '9:16']).filter(option => option !== 'adaptive')
+        const chosenRatio = videoRatios.includes(ratio) ? ratio : videoRatios[0]!
 
         /** Ask for a picture; the answer carries the bytes inline. */
         async function makeImage(): Promise<void> {
@@ -1618,9 +1649,10 @@ interface GenerationFailure {
               body: JSON.stringify({
                 kind: 'video',
                 prompt,
-                duration,
-                resolution,
-                ratio,
+                model: videoModel,
+                duration: chosenDuration,
+                resolution: chosenResolution,
+                ratio: chosenRatio,
               }),
             })
             const body = await response.json() as GenerationFailure & { ok?: boolean; taskId?: string }
@@ -1685,9 +1717,10 @@ interface GenerationFailure {
               select(aspect, setAspect, options?.imageAspectRatios ?? ['auto', '16:9', '1:1']),
               select(area, setArea, options?.imageAreas ?? ['1K', '2K', '4K']))
             : h('div', { style: rowStyle },
-              select(String(duration), next => setDuration(Number(next)), (options?.videoDurations ?? [5, 10]).map(String)),
-              select(resolution, setResolution, options?.videoResolutions ?? ['768P', '2K']),
-              select(ratio, setRatio, options?.videoRatios ?? ['16:9', '9:16'])),
+              select(videoModel, setVideoModel, videoModels),
+              select(String(chosenDuration), next => setDuration(Number(next)), videoDurations.map(String)),
+              select(chosenResolution, setResolution, videoResolutions),
+              select(chosenRatio, setRatio, videoRatios)),
           h('div', { style: rowStyle },
             h('button', {
               type: 'button',

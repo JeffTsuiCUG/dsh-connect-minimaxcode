@@ -51,8 +51,33 @@ export const VIDEO_QUERY_PATH = '/v2/query/video_generation'
 /** The image models the endpoint serves. */
 export const IMAGE_MODELS = ['MiniMax-H3-Image', 'MiniMax-H3-Image-Highspeed'] as const
 
-/** The video model the endpoint serves. */
-export const VIDEO_MODEL = 'MiniMax-H3'
+/**
+ * The video models the endpoint serves.
+ *
+ * Which of them a given account may use is the plan's decision, not the
+ * plugin's: measured on **2026-11-25**, a `Go` account was refused
+ * `MiniMax-H3` with `2068 当前 Token Plan 套餐等级不支持该模型` while
+ * `MiniMax-H3-Max` went through. So the list is offered whole and the
+ * default is the one that a merely-subscribed account can actually use —
+ * picking the other one by default would make the panel fail for every
+ * reader who never touched the control.
+ */
+export const VIDEO_MODELS = ['MiniMax-H3-Max', 'MiniMax-H3'] as const
+
+/** The video model a task is started with when the caller does not choose. */
+export const VIDEO_MODEL = VIDEO_MODELS[0]
+
+/** What the account may spend on a model is not known before the call. */
+export interface VideoModelOption {
+  /** The model's identifier, as the endpoint spells it. */
+  id: string
+  /** The lengths this model accepts, in seconds. */
+  durations: number[]
+  /** The output resolutions this model accepts. */
+  resolutions: string[]
+  /** The aspect ratios this model accepts. */
+  ratios: string[]
+}
 
 /** Aspect ratios the desktop app offers for images. */
 export const IMAGE_ASPECT_RATIOS = [
@@ -62,14 +87,81 @@ export const IMAGE_ASPECT_RATIOS = [
 /** Output areas the endpoint serves. */
 export const IMAGE_AREAS = ['1K', '2K', '4K'] as const
 
-/** Aspect ratios the desktop app offers for video. */
-export const VIDEO_RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const
+/**
+ * Aspect ratios the endpoint serves for video.
+ *
+ * `adaptive` is in the list because the endpoint accepts it, but it is only
+ * meaningful for an image-to-video call: a text-only call is refused with
+ * `t2va(纯文本)场景必须显式指定 ratio 且不能为 adaptive`. The panel keeps it
+ * out of the text case rather than letting the reader pick a value that is
+ * guaranteed to be refused.
+ */
+export const VIDEO_RATIOS = ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'] as const
 
 /** Output resolutions the endpoint serves for video. */
-export const VIDEO_RESOLUTIONS = ['768P', '2K'] as const
+export const VIDEO_RESOLUTIONS = ['480P', '720P', '768P', '2K'] as const
 
 /** Durations the endpoint serves for video, in seconds. */
-export const VIDEO_DURATIONS = [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const
+export const VIDEO_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const
+
+/**
+ * What each video model accepts, as measured against the live endpoint.
+ *
+ * The two models do not accept the same choices, and the endpoint names the
+ * difference itself when asked for something wrong. Measured **2026-11-25**,
+ * by sending a legal body with one deliberately wrong field so that the
+ * answer names the legal values without creating a task:
+ *
+ *  - `MiniMax-H3` answers `supported durations: 4s … 15s`;
+ *  - `MiniMax-H3-Max` answers `supported durations: 5s … 15s` — no 4 seconds;
+ *  - `MiniMax-H3` names `480P, 768P, 2K`; `MiniMax-H3-Max` names `480P, 768P`.
+ *
+ * `720P` is accepted by both even though that message does not name it, and
+ * was watched to finish: a `MiniMax-H3-Max` task at 720P came back
+ * `succeeded`. The message is a subset, not a contract, so the tables below
+ * follow what actually ran rather than the sentence in the error.
+ *
+ * `2K` is offered for `MiniMax-H3` (named by the endpoint) and withheld from
+ * `MiniMax-H3-Max` (not named by it, and the one probe that could have
+ * settled it is the one this account may not run — see `VIDEO_MODELS`).
+ * Offering something that might be refused costs an attempt; leaving a
+ * higher-tier choice out costs only the choice.
+ */
+export const VIDEO_MODEL_OPTIONS: readonly VideoModelOption[] = [
+  {
+    id: 'MiniMax-H3-Max',
+    durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    resolutions: ['480P', '720P', '768P'],
+    ratios: [...VIDEO_RATIOS],
+  },
+  {
+    id: 'MiniMax-H3',
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    resolutions: ['480P', '720P', '768P', '2K'],
+    ratios: [...VIDEO_RATIOS],
+  },
+]
+
+/** The options of one video model, falling back to the default model's. */
+export function videoModelOptions(model: string | undefined): VideoModelOption {
+  const wanted = model ?? VIDEO_MODEL
+  return VIDEO_MODEL_OPTIONS.find(option => option.id === wanted) ?? VIDEO_MODEL_OPTIONS[0]!
+}
+
+/**
+ * The ratios that make sense at a given resolution.
+ *
+ * `720P` is a special case the endpoint states outright: measured
+ * **2026-11-25**, `MiniMax-H3 720P` answered `resolution 720P only supports
+ * ratio 16:9 or 9:16`. Narrowing the list here keeps a reader from picking a
+ * combination that is certain to be refused.
+ */
+export function videoRatiosFor(resolution: string | undefined): string[] {
+  if (resolution === '720P') return [`16:9`, `9:16`]
+  // `adaptive` follows the picture it is given, so it has no meaning for the
+  // text-only call this panel makes.
+  return VIDEO_RATIOS.filter(ratio => ratio !== 'adaptive')
+}
 
 /** One generated image, as the endpoint reports it. */
 export interface GeneratedImage {
@@ -115,6 +207,15 @@ export interface VideoGenerationResult {
   totalSeconds?: number
   /** Total tokens the generation used. */
   totalTokens?: number
+  /**
+   * Why the task failed, in the upstream's own words.
+   *
+   * A task that ends `failed` still answers with HTTP 200 and a well-formed
+   * shape, so the only place the reason exists is here. Dropping it left the
+   * panel with "generation failed" and nothing to report — measured
+   * **2026-11-25**, where the reason was `2068 当前 Token Plan 套餐等级不支持该模型`.
+   */
+  error?: { code?: number; message?: string }
 }
 
 import { classifyFailure, type FailureVerdict } from './failure.ts'
@@ -365,6 +466,7 @@ export async function startVideoTask(
     apiKey: string
     region: MinimaxRegion
     prompt: string
+    model?: string
     duration?: number
     resolution?: string
     ratio?: string
@@ -382,7 +484,7 @@ export async function startVideoTask(
     content.push({ type: 'image_url', image_url: { url: options.lastFrameUrl }, role: 'last_frame' })
   }
   const body: Record<string, unknown> = {
-    model: VIDEO_MODEL,
+    model: options.model ?? VIDEO_MODEL,
     content,
   }
   if (options.duration !== undefined) body.duration = options.duration
@@ -450,10 +552,14 @@ export async function queryVideoTask(
 
   // The task's own shape, measured against the live endpoint:
   // { task: { id, model, status, content: { url }, resolution, duration,
-  //   ratio, usage: { total_seconds, total_tokens } } }.
+  //   ratio, error: { code, message }, usage: { total_seconds, total_tokens } } }.
   const task = (document.task ?? document) as Record<string, unknown>
   const content = task.content as Record<string, unknown> | undefined
   const usage = task.usage as Record<string, unknown> | undefined
+  const taskError = task.error as Record<string, unknown> | undefined
+  const errorCode = taskError?.code
+  const parsedErrorCode = typeof errorCode === 'string' ? Number(errorCode) : errorCode
+  const taskErrorMessage = taskError?.message
   return {
     taskId: options.taskId,
     status: typeof task.status === 'string' ? task.status : undefined,
@@ -463,5 +569,13 @@ export async function queryVideoTask(
     ratio: typeof task.ratio === 'string' ? task.ratio : undefined,
     totalSeconds: typeof usage?.total_seconds === 'number' ? usage.total_seconds : undefined,
     totalTokens: typeof usage?.total_tokens === 'number' ? usage.total_tokens : undefined,
+    ...taskErrorMessage === undefined && (parsedErrorCode === undefined || !Number.isFinite(parsedErrorCode))
+      ? {}
+      : {
+          error: {
+            ...typeof parsedErrorCode === 'number' && Number.isFinite(parsedErrorCode) ? { code: parsedErrorCode } : {},
+            ...typeof taskErrorMessage === 'string' ? { message: taskErrorMessage } : {},
+          },
+        },
   }
 }

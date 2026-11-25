@@ -20,6 +20,8 @@ import {
   IMAGE_AREAS,
   IMAGE_MODELS,
   VIDEO_DURATIONS,
+  VIDEO_MODEL,
+  VIDEO_MODELS,
   VIDEO_RATIOS,
   VIDEO_RESOLUTIONS,
   downloadImage,
@@ -27,6 +29,8 @@ import {
   generateImages,
   queryVideoTask,
   startVideoTask,
+  videoModelOptions,
+  videoRatiosFor,
 } from '../src/generation.ts'
 
 /** A request the stub saw. */
@@ -72,6 +76,47 @@ describe('the generation option lists', () => {
     expect(VIDEO_RESOLUTIONS).toContain('2K')
     expect(VIDEO_RATIOS).toContain('16:9')
     expect(VIDEO_DURATIONS).toContain(5)
+  })
+
+  it('defaults the video model to the one a subscribed account can use', () => {
+    // Measured 2026-11-25: a `Go` account is refused `MiniMax-H3` with
+    // 2068 "your plan does not include this model", while this one runs.
+    // Defaulting to the other would make the panel fail for every reader
+    // who never touched the control.
+    expect(VIDEO_MODEL).toBe('MiniMax-H3-Max')
+    expect(VIDEO_MODELS).toContain('MiniMax-H3')
+  })
+
+  it('gives each video model only the choices the endpoint accepted for it', () => {
+    // The endpoint names these: `MiniMax-H3` answers
+    // "supported durations: 4s … 15s" and "supported resolutions: 480P, 768P,
+    // 2K"; `MiniMax-H3-Max` answers 5s … 15s and 480P, 768P. Offering more
+    // than a model accepts costs an attempt that cannot succeed.
+    expect(videoModelOptions('MiniMax-H3').durations).toContain(4)
+    expect(videoModelOptions('MiniMax-H3-Max').durations).not.toContain(4)
+    expect(videoModelOptions('MiniMax-H3').resolutions).toContain('2K')
+    expect(videoModelOptions('MiniMax-H3-Max').resolutions).not.toContain('2K')
+    // 720P is accepted by both even though the supported-resolutions sentence
+    // omits it: a MiniMax-H3-Max task at 720P was watched to succeed.
+    expect(videoModelOptions('MiniMax-H3-Max').resolutions).toContain('720P')
+  })
+
+  it('falls back to the default model for an unknown one', () => {
+    expect(videoModelOptions('not-a-model').id).toBe(VIDEO_MODEL)
+    expect(videoModelOptions(undefined).id).toBe(VIDEO_MODEL)
+  })
+
+  it('narrows the ratios at 720P, where only two are legal', () => {
+    // Measured 2026-11-25: "resolution 720P only supports ratio 16:9 or 9:16".
+    expect(videoRatiosFor('720P')).toEqual(['16:9', '9:16'])
+    expect(videoRatiosFor('768P')).toContain('1:1')
+  })
+
+  it('keeps adaptive out of the text-only call', () => {
+    // "adaptive" follows a picture it is given; a text-only call is refused:
+    // "t2va(纯文本)场景必须显式指定 ratio 且不能为 adaptive".
+    expect(VIDEO_RATIOS).toContain('adaptive')
+    expect(videoRatiosFor('768P')).not.toContain('adaptive')
   })
 })
 
@@ -188,12 +233,28 @@ describe('video tasks', () => {
     expect(seen[0]?.url).toBe('https://api.minimax.cn/v2/video_generation')
     expect(seen[0]?.authorization).toBe(`Bearer ${API_KEY}`)
     expect(seen[0]?.body).toEqual({
-      model: 'MiniMax-H3',
+      // The default is the model a merely-subscribed account can use: on a
+      // `Go` plan `MiniMax-H3` answers 2068 "your plan does not include this
+      // model" while this one runs. Measured 2026-11-25.
+      model: 'MiniMax-H3-Max',
       content: [{ type: 'text', text: 'a cat on a windowsill' }],
       duration: 5,
       resolution: '768P',
       ratio: '16:9',
     })
+  })
+
+  it('carries the model the caller chose', async () => {
+    const seen: Seen[] = []
+    const fetchImpl = stubFetch({ '/v2/video_generation': { body: { task_id: 'task-3' } } }, seen)
+    await startVideoTask({
+      apiKey: API_KEY,
+      region: 'cn',
+      prompt: 'a cat',
+      model: 'MiniMax-H3',
+      fetchImpl,
+    })
+    expect((seen[0]?.body as { model: string }).model).toBe('MiniMax-H3')
   })
 
   it('carries a first frame when one is given', async () => {
@@ -246,6 +307,37 @@ describe('video tasks', () => {
     expect(task.ratio).toBe('16:9')
     expect(task.totalSeconds).toBe(5)
     expect(task.totalTokens).toBe(162745)
+  })
+
+  it('carries the reason a task failed, so the card can say it', async () => {
+    // Measured 2026-11-25: a `Go` account asking for `MiniMax-H3` gets a task
+    // whose status is "failed" and whose reason lives in `task.error`. The
+    // code arrives as a string there, not a number.
+    const fetchImpl = stubFetch({
+      '/v2/query/video_generation/task-9': {
+        body: {
+          task: {
+            id: 'task-9',
+            model: 'MiniMax-H3',
+            status: 'failed',
+            error: { code: '2068', message: '当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。' },
+            usage: {},
+          },
+        },
+      },
+    })
+    const task = await queryVideoTask({ apiKey: API_KEY, region: 'cn', taskId: 'task-9', fetchImpl })
+    expect(task.status).toBe('failed')
+    expect(task.error?.code).toBe(2068)
+    expect(task.error?.message).toContain('套餐等级不支持')
+  })
+
+  it('leaves the reason out of a task that carries none', async () => {
+    const fetchImpl = stubFetch({
+      '/v2/query/video_generation/task-1': { body: { task: { id: 'task-1', status: 'running' } } },
+    })
+    const task = await queryVideoTask({ apiKey: API_KEY, region: 'cn', taskId: 'task-1', fetchImpl })
+    expect(task.error).toBeUndefined()
   })
 
   it('reports a task that does not exist', async () => {

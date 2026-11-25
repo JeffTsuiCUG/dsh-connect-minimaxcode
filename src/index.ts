@@ -45,6 +45,8 @@ import {
   IMAGE_MODELS,
   MINIMAX_API_HOSTS,
   VIDEO_DURATIONS,
+  VIDEO_MODEL_OPTIONS,
+  VIDEO_MODELS,
   VIDEO_RATIOS,
   VIDEO_RESOLUTIONS,
   downloadImage,
@@ -928,9 +930,20 @@ function apply(ctx: Context) {
         imageModels: [...IMAGE_MODELS],
         imageAspectRatios: [...IMAGE_ASPECT_RATIOS],
         imageAreas: [...IMAGE_AREAS],
+        videoModels: [...VIDEO_MODELS],
         videoDurations: [...VIDEO_DURATIONS],
         videoResolutions: [...VIDEO_RESOLUTIONS],
         videoRatios: [...VIDEO_RATIOS],
+        videoModelOptions: Object.fromEntries(
+          VIDEO_MODEL_OPTIONS.map(option => [
+            option.id,
+            {
+              durations: [...option.durations],
+              resolutions: [...option.resolutions],
+              ratios: [...option.ratios],
+            },
+          ]),
+        ),
       },
     })
   }
@@ -1133,6 +1146,7 @@ function apply(ctx: Context) {
         apiKey,
         region,
         prompt,
+        model: typeof body.model === 'string' ? body.model : undefined,
         duration: typeof body.duration === 'number' ? body.duration : undefined,
         resolution: typeof body.resolution === 'string' ? body.resolution : undefined,
         ratio: typeof body.ratio === 'string' ? body.ratio : undefined,
@@ -1187,6 +1201,15 @@ function apply(ctx: Context) {
       taskId: task.taskId,
       status: task.status,
       url: task.url,
+      // A failed task answers 200 with the reason only inside the task, so
+      // passing it on is the difference between "it failed" and "it failed
+      // because your plan does not include this model".
+      ...task.error === undefined
+        ? {}
+        : {
+            error: task.error,
+            upstream: { status: 200, ...task.error },
+          },
     }
   }
 

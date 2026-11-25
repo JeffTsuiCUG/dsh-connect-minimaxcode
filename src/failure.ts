@@ -75,10 +75,18 @@ export interface FailureVerdict {
  * is a fact about the account, "2062" is a number another system chose.
  */
 const SHAPES: { kind: FailureKind; pattern: RegExp }[] = [
-  // The account holds no plan. Checked before the parameter shapes because
-  // this one is reported as a bad request too, and it needs a different
-  // remedy: no amount of changing the parameters helps.
-  { kind: 'subscription', pattern: /no active (token plan|subscription)|not subscribed|no subscription/i },
+  // The account holds no plan, or its plan does not reach this model.
+  // Checked before the parameter shapes because this one is reported as a
+  // bad request or a payment problem too, and it needs a different remedy:
+  // no amount of changing the parameters helps.
+  //
+  // The Chinese half was measured on **2026-11-25**: asking for the video
+  // model `MiniMax-H3` on a `Go` plan answers HTTP 402 with
+  // `当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。 (2068)`. The
+  // endpoint calls that body `insufficient_balance_error`, so a rule keyed on
+  // "insufficient" would call a plan limit a spent allowance and send the
+  // reader looking for credit they already have.
+  { kind: 'subscription', pattern: /no active (token plan|subscription)|not subscribed|no subscription|套餐等级不支持|套餐不支持|升级套餐/i },
   // The credential was refused. The wording the upstream uses for it varies,
   // but every variant says the same thing: this key is not accepted.
   { kind: 'credentials', pattern: /login fail|log ?in fail|unauthorized|invalid api[ _-]?key|api secret key|invalid credential|authentication (failed|error)/i },
@@ -111,6 +119,13 @@ export function classifyFailure(message: string, status?: number): FailureKind {
     if (shape.pattern.test(message)) return shape.kind
   }
 
+  // HTTP 402 is "payment required", which covers both a spent allowance and
+  // a plan that does not reach this model. The wording is what tells them
+  // apart, and it was read first above; only a 402 whose words matched
+  // nothing is attributed to the plan, because that is what the generation
+  // endpoint actually used it for — measured **2026-11-25** on a `Go` account
+  // asking for `MiniMax-H3`.
+  if (status === 402) return 'subscription'
   // A bad request with no more specific wording is a bad request.
   if (status === 400 || status === 422) return 'parameters'
   return 'upstream'

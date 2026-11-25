@@ -346,8 +346,11 @@ model** and **H3 video generation** directly:
 
 - Images: `MiniMax-H3-Image` (and `MiniMax-H3-Image-Highspeed`), with an
   aspect ratio and a 1K / 2K / 4K area
-- Video: `MiniMax-H3`, with a length of 5–15 seconds, 768P / 2K and an
-  aspect ratio
+- Video: `MiniMax-H3-Max` (the default) or `MiniMax-H3`, where the length,
+  the resolution and the aspect ratio are listed **for the model that was
+  chosen** (H3 takes 4–15 seconds and 2K, H3-Max takes 5–15 seconds and at
+  most 768P; both take 480P / 720P / 768P, but 720P allows only the 16:9 and
+  9:16 aspect ratios)
 
 Both go through the endpoints the open platform's own documentation gives:
 
@@ -435,6 +438,64 @@ The plugin follows semantic versioning, and **each level means the same thing** 
 
 Every entry in the changelog opens with why it is that level, and with **what this release deliberately did not do** — the boundaries are worth knowing more than the features, so they come first.
 ## Changelog
+
+### 0.8.0 (2026-11-25)
+
+> This is a **minor** release: it adds one user-visible capability (choosing
+> the video model) and changes the shape of a generation failure's message.
+> **No interface changes** — the `generation` block of `status` only **gains**
+> fields, and the meaning of every existing key is unchanged.
+
+#### Added
+
+- **The video model is now a choice**: `MiniMax-H3-Max` or `MiniMax-H3`, with
+  the former as the default. This is not decoration — measured 2026-11-25, a
+  `Go` plan is **refused `MiniMax-H3` outright**: submission answers
+  `HTTP 402`, the task ends `failed`, and `error.code` is `2068`, "your Token
+  Plan tier does not include this model; upgrade to use it", while four
+  `MiniMax-H3-Max` tasks all succeeded at the same moment. The panel used to
+  hard-code `MiniMax-H3` into the request, so **anyone on Go pressed "Generate
+  video" and it failed, every time**.
+- **The video options are listed for the model that was chosen**: H3 takes
+  4–15 seconds (the panel used to start at 5 and was missing 4) and offers 2K;
+  H3-Max takes 5–15 seconds and stops at 768P. Both take 480P / 720P / 768P.
+  Choose H3-Max and **4 seconds and 2K are no longer offered** — it refuses
+  them, and an attempt that is certain to be refused is a button pressed for
+  nothing.
+- **720P appears only with an aspect ratio it accepts**: 720P takes `16:9` and
+  `9:16` and nothing else, answering `invalid params, resolution 720P only
+  supports ratio 16:9 or 9:16 (2013)` for the rest. Choosing 720P narrows the
+  aspect ratios to those two.
+- **The `adaptive` aspect ratio** only means something when a first frame is
+  given; a text-only call is refused with `t2va … must give an explicit ratio
+  and may not use adaptive`, so the panel does not list it.
+
+#### Fixed
+
+- **A failed task now says why, in the upstream's own words**: the task query
+  carries `task.error.{code,message}`, which the plugin did not read, so a
+  failure could only show a generic "generation failed". The reason is now
+  passed through and shown as it arrived — including the 2068 text above. Note
+  that the `code` there is the **string** `"2068"`, not a number; it is
+  normalised before being classified.
+- **The plan gate is classified as a plan gate**: `402` carries both "out of
+  balance" and "your plan does not cover this", and classifying by
+  `error.type` (which is `insufficient_balance_error` in both cases) said "out
+  of balance" every time. The upstream's wording now wins — plan/upgrade words
+  mean "plan", balance/exceeded words mean "quota", and only an unrecognised
+  402 falls back to "plan".
+
+#### Deliberately not done
+
+- **H3 is not hidden from accounts that cannot use it.** The plugin has no way
+  to read "which models this account may use"; hard-coding "Go cannot use H3"
+  would turn into a new wrong answer the day someone upgrades. Both models are
+  offered and the upstream answers — and its answer is now actually visible.
+- **`2K` is not offered on H3-Max.** It is absent from the set the endpoint
+  itself lists, and never watched to succeed. Better to show one option fewer
+  than one that cannot work.
+- **`adaptive` is not accepted quietly.** It holds only for image-to-video, and
+  the panel is text-only for now; it comes back when a first-frame entry does.
 
 ### 0.7.2 (2026-11-20)
 
@@ -775,11 +836,10 @@ Fixing it yourself is even better — just open the PR. The format does not matt
 ## Contributors
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** — raised the request for a plugin-page icon and Chinese/English copy ([#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)). It became 0.5.2: the plugin page has its own SVG artwork, the title and the introduction come in both languages, and the interface follows the host's language.
-- **[azsora](https://github.com/azsora)** — found the plan's rate-limit endpoint in the desktop app's own traffic and wired the 5-hour and weekly usage windows into the credit pill and the plugin page ([#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)): the window length is derived from the response's own edges rather than hard-coded. It became 0.5.5.
 - **[qzz19970504](https://github.com/qzz19970504)** — found and fixed the wiring gap that made every image upload fail ([#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)): the catalog declared the `image` modality, but the adapter never connected the host's durable attachment service, so pi-ai refused image requests before they were sent. The fix became 0.5.3.
-- **[azsora](https://github.com/azsora)** — found that the official quota endpoint renamed its window field and inverted its meaning (the share used became the share remaining), closed the gap where a 200 with an unreadable shape never reached the older path, and reworked the pill detail and the page card into rounded sub-cards that say why there are no windows ([#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)). It became 0.6.7.
 - **[lulunick](https://github.com/lulunick)** — found the real reason the "Generate an image" entry failed **every** time: the plugin took `session.prompt` off the session object and called it as a standalone function, so `this` pointed at the wrapper instead of at the session — and the host's own `Session.prompt` reaches the gateway through `this.remote`, which made the call throw `undefined is not an object`. With the methods bound back to their session the picture actually goes out; he also added the local submission echo the host asks for (`beginSubmission()` — the plugin used to invent its own `requestId`, so the model received the picture and the conversation showed nothing) and reports a refusal honestly (the host resolves with `{ ok: false }` rather than throwing). The test's mock now reads `this.remote` the way the host does, which is what makes all three observable ([#7](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/7)). It became 0.6.8.
-- **[azsora](https://github.com/azsora)** — moved the plan tier into the Plan box as its headline line, at the balance box's own big-number size, named the box "Plan", and left no hole in the grid ([#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)). It became 0.6.8.
+- **[azsora](https://github.com/azsora)** — three changes from one person ([#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4), [#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5), [#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)): first he found the plan's rate-limit endpoint in the desktop app's own traffic and wired the 5-hour and weekly usage windows into the credit pill and the plugin page, deriving the window length from the response's own edges rather than hard-coding it (0.5.5); then he found that the official quota endpoint had renamed its window field and inverted its meaning (the share used became the share remaining), closed the gap where a 200 with an unreadable shape never reached the older path, and reworked the pill detail and the page card into rounded sub-cards that say why there are no windows (0.6.7); finally he moved the plan tier into the Plan box as its headline line, at the balance box's own big-number size, and left no hole in the grid (0.6.8).
+- **[raj601822-debug](https://github.com/raj601822-debug)** — made the H3 picture models actually show up in the host's model picker ([#8](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/8)): an `LlmAdapter` that only serves the picture path bridges `MiniMax-H3-Image` and `MiniMax-H3-Image-Highspeed` into the selector, which is what makes "switch models mid-conversation and draw something" possible. The prompt is taken only from messages whose `source.kind === 'user'`, with the host's injected blocks stripped, and calls that arrive with `purpose: 'session-title' | 'compaction'` answer locally instead of reaching the upstream, so titling and compaction do not spend a generation. The declared 1,000,000-token window looks absurd but is forced by `compaction-basic`, whose trigger is `min(W × 0.8, W − O − 65536)` — a small window makes that negative and the host would ask to compact from the very first turn. He also added the aspect-ratio and resolution pill in the composer (inline `--ar 16:9`, `--1k|--2k|--4k` and `--n 2` are recognised too), with the choice stored in `~/.dsh/.minimaxcode-state.json`. It became 0.8.0.
 - Plugin author: **[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## Acknowledgements

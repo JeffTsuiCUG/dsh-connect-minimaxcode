@@ -81,6 +81,18 @@ function reactHarness() {
   }
   return {
     react,
+    /**
+     * Start from empty slots.
+     *
+     * The slots are positional, so a component rendered after another one
+     * would read that one's state. Rendering a single component in isolation
+     * has to clear them first.
+     */
+    reset() {
+      states.length = 0
+      refs.length = 0
+      cursor = 0
+    },
     render(component: (props: unknown) => unknown, props: unknown) {
       cursor = 0
       return component(props)
@@ -592,5 +604,195 @@ describe('client bundle', () => {
     const second = JSON.stringify(renderDeep(harness, optionsSlot!, activeProps))
     expect(second).toContain('16:9')
     expect(second).toContain('2K')
+  })
+})
+
+describe('the video controls follow the model they belong to', () => {
+  /**
+   * Read back the <select> controls the panel offers for video.
+   *
+   * Which combinations a model accepts is the endpoint's own answer, not our
+   * taste: `MiniMax-H3-Max` refuses 4 seconds and 2K while `MiniMax-H3`
+   * takes both, and a Go plan refuses `MiniMax-H3` outright (2068, measured
+   * 2026-11-25). Offering a combination that is certain to be refused spends
+   * an attempt that cannot succeed, so each model's row is checked against
+   * the limits it actually has.
+   */
+  async function videoSelects(generation: Record<string, unknown>): Promise<{
+    model: string[]
+    duration: string[]
+    resolution: string[]
+    ratio: string[]
+    chosen: { model: string; duration: string; resolution: string; ratio: string }
+  }> {
+    const harness = reactHarness()
+    const loaded = loadClient({ ...STATUS, generation })
+    const plugin = loaded.registrations[0]!.factory(() => harness.react)
+    let page: ((props: unknown) => unknown) | undefined
+    plugin.apply({
+      slots: {
+        inject: (_name: string, register: () => unknown) => register(),
+        register: (options: { name?: string }, rendered: (props: unknown) => unknown) => {
+          if (options?.name === 'plugins.bundle.config') page = rendered
+          return () => {}
+        },
+      },
+      locale: { register: () => {}, bind: () => (key: string) => key },
+      effect: (effect: () => unknown) => effect(),
+    })
+    expect(page, 'the plugin page is not registered').toBeDefined()
+
+    const findPanel = (node: unknown): { type: (props: unknown) => unknown; props: unknown } | undefined => {
+      if (typeof node !== 'object' || node === null) return undefined
+      const element = node as { type?: unknown; props?: unknown; children?: unknown[] }
+      if (typeof element.type === 'function' && (element.type as { name?: string }).name === 'GenerationPanel') {
+        return element as { type: (props: unknown) => unknown; props: unknown }
+      }
+      for (const child of element.children ?? []) {
+        const found = findPanel(child)
+        if (found !== undefined) return found
+      }
+      return undefined
+    }
+    const panel = findPanel(harness.render(page!, { view: 'page' }))
+    expect(panel, 'the page does not draw the generation panel').toBeDefined()
+
+    // The panel is rendered on its own, so its hook slots start empty: the
+    // page's own state would otherwise sit in the slots the panel reads.
+    harness.reset()
+    harness.render(panel!.type, panel!.props)
+    // The panel reads the status in an effect; the fetch settles a tick later.
+    await new Promise(resolve => setTimeout(resolve, 15))
+    // The panel opens on the picture tab, so the video row only exists after
+    // the video tab is chosen: the click is what a person does first.
+    const tree = harness.render(panel!.type, panel!.props) as unknown
+    const press = (node: unknown, label: string): boolean => {
+      if (typeof node !== 'object' || node === null) return false
+      const element = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown[] }
+      if (element.type === 'button') {
+        const text = (element.children ?? []).map(child => typeof child === 'string' ? child : '').join('')
+        if (text === label) {
+          ;(element.props?.onClick as (() => void) | undefined)?.()
+          return true
+        }
+      }
+      for (const child of element.children ?? []) if (press(child, label)) return true
+      return false
+    }
+    // The label comes from the injected translator, which is the identity
+    // here, so the Chinese copy is what a person sees.
+    expect(press(tree, '视频'), 'the panel offers no video tab').toBe(true)
+    const videoTree = harness.render(panel!.type, panel!.props) as unknown
+
+    const walk = (node: unknown, found: { value: string; options: string[] }[]): void => {
+      if (typeof node !== 'object' || node === null) return
+      const element = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown[] }
+      if (element.type === 'select') {
+        const children = (element.children ?? []) as { props?: Record<string, unknown> }[]
+        found.push({
+          value: String(element.props?.value ?? ''),
+          options: children.map(child => String(child.props?.value ?? '')),
+        })
+        return
+      }
+      for (const child of element.children ?? []) walk(child, found)
+    }
+    const selects: { value: string; options: string[] }[] = []
+    walk(videoTree, selects)
+
+    // The video row is the one whose first select lists nothing but video
+    // models: a test may hand it a single model, so the name to look for is
+    // the prefix the endpoint uses, not one model in particular.
+    const row = selects.find(entry =>
+      entry.options.length > 0 && entry.options.every(option => option.startsWith('MiniMax-H3')))
+    expect(row, 'the video row offers no model choice').toBeDefined()
+    const index = selects.indexOf(row!)
+    const rowSelects = selects.slice(index, index + 4)
+    expect(rowSelects.length, 'the video row is missing a control').toBe(4)
+    const [model, duration, resolution, ratio] = rowSelects
+    return {
+      model: model!.options,
+      duration: duration!.options,
+      resolution: resolution!.options,
+      ratio: ratio!.options,
+      chosen: {
+        model: model!.value,
+        duration: duration!.value,
+        resolution: resolution!.value,
+        ratio: ratio!.value,
+      },
+    }
+  }
+
+  const limits = {
+    'MiniMax-H3-Max': { durations: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolutions: ['480P', '720P', '768P'], ratios: ['21:9', '16:9'] },
+    'MiniMax-H3': { durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolutions: ['480P', '720P', '768P', '2K'], ratios: ['21:9', '16:9'] },
+  }
+
+  it('offers both video models, defaulting to the one a subscribed account can use', async () => {
+    const row = await videoSelects({
+      imageModels: ['MiniMax-H3-Image'],
+      imageAspectRatios: ['auto'],
+      imageAreas: ['1K'],
+      videoModels: ['MiniMax-H3-Max', 'MiniMax-H3'],
+      videoDurations: [5],
+      videoResolutions: ['768P'],
+      videoRatios: ['16:9'],
+      videoModelOptions: limits,
+    })
+    expect(row.model).toEqual(['MiniMax-H3-Max', 'MiniMax-H3'])
+    expect(row.chosen.model).toBe('MiniMax-H3-Max')
+  })
+
+  it('does not offer 4 seconds or 2K on the model that refuses them', async () => {
+    const row = await videoSelects({
+      imageModels: ['MiniMax-H3-Image'],
+      imageAspectRatios: ['auto'],
+      imageAreas: ['1K'],
+      videoModels: ['MiniMax-H3-Max'],
+      videoDurations: [4, 5],
+      videoResolutions: ['768P', '2K'],
+      videoRatios: ['16:9'],
+      videoModelOptions: limits,
+    })
+    expect(row.duration).not.toContain('4')
+    expect(row.resolution).not.toContain('2K')
+  })
+
+  it('narrows the aspect ratios when 720P is the chosen resolution', async () => {
+    // 720P is legal on both models but takes only 16:9 and 9:16, answering
+    // "invalid params, resolution 720P only supports ratio 16:9 or 9:16" for
+    // the rest (measured 2026-11-25). The model here accepts 4:3 at other
+    // resolutions, so a panel that forgot the limit would list it.
+    const row = await videoSelects({
+      imageModels: ['MiniMax-H3-Image'],
+      imageAspectRatios: ['auto'],
+      imageAreas: ['1K'],
+      videoModels: ['MiniMax-H3-Max'],
+      videoDurations: [5],
+      videoResolutions: ['720P'],
+      videoRatios: ['16:9'],
+      videoModelOptions: {
+        'MiniMax-H3-Max': { durations: [5], resolutions: ['720P'], ratios: ['4:3', '16:9', '9:16'] },
+      },
+    })
+    expect(row.chosen.resolution).toBe('720P')
+    expect(row.ratio).not.toContain('4:3')
+    expect(row.ratio).toEqual(['16:9', '9:16'])
+  })
+
+  it('offers the full set on the model that accepts it', async () => {
+    const row = await videoSelects({
+      imageModels: ['MiniMax-H3-Image'],
+      imageAspectRatios: ['auto'],
+      imageAreas: ['1K'],
+      videoModels: ['MiniMax-H3'],
+      videoDurations: [4],
+      videoResolutions: ['2K'],
+      videoRatios: ['16:9'],
+      videoModelOptions: limits,
+    })
+    expect(row.duration).toContain('4')
+    expect(row.resolution).toContain('2K')
   })
 })

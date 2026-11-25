@@ -380,7 +380,7 @@ Authorization: Bearer <OAuth 令牌>
 插件页多了一个「生成」面板，可以直接用 MiniMax 的 **H3 生图**与 **H3 视频生成**：
 
 - 图片：`MiniMax-H3-Image`（另有 `MiniMax-H3-Image-Highspeed`），可选画幅与 1K / 2K / 4K 清晰度
-- 视频：`MiniMax-H3`，可选 5–15 秒、768P / 2K 与画幅
+- 视频：`MiniMax-H3-Max`（默认）或 `MiniMax-H3`，时长、分辨率与画幅**按所选模型各自可用的范围列出**（H3 支持 4–15 秒与 2K，H3-Max 支持 5–15 秒、最高 768P；两者都支持 480P / 720P / 768P，但 720P 只有 16:9 与 9:16 两种画幅）
 
 两者走的都是**开放平台官方文档给出的接口**：
 
@@ -442,6 +442,28 @@ OAuth 令牌有效期约 1 小时，由客户端自动续期。插件**只在自
 
 更新记录里的每一版开头都写着这一版为什么是该级别，以及**这一版刻意没做什么** —— 边界比功能更值得知道，所以它写在了前面。
 ## 更新记录
+
+### 0.8.0（2026-11-25）
+
+> 版本号是 **minor**：新增「视频模型可选」这一项用户可见的能力，并改变生成失败时的提示形状。**无接口变化** —— `status` 的 `generation` 块只**新增**字段，既有键的含义不变。
+
+#### 新增
+
+- **视频可以选模型了**：`MiniMax-H3-Max` 与 `MiniMax-H3` 二选一，默认取前者。这不是为了好看 —— 实测（2026-11-25）在 `Go` 档位下 **`MiniMax-H3` 会被上游直接拒绝**：提交时 `HTTP 402`，任务最终 `failed`，`error.code` 为 `2068`「当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。」，而 `MiniMax-H3-Max` 同一时间四个任务全部 `succeeded`。此前面板把 `MiniMax-H3` 写死在请求里，**订阅了 Go 的人点「生成视频」必然失败**。
+- **视频的选项按所选模型各自列**：H3 支持 4–15 秒（此前面板从 5 开始，少了 4）、分辨率含 2K；H3-Max 支持 5–15 秒、分辨率到 768P。两者都合法的是 480P / 720P / 768P。选了 H3-Max 就**不会再给你 4 秒或 2K** —— 这两个它会拒绝，而每一次被拒的尝试都是一次白按。
+- **720P 只在有合法画幅时才出现**：实测 720P 只接受 `16:9` 与 `9:16`，其它画幅报 `invalid params, resolution 720P only supports ratio 16:9 or 9:16 (2013)`。选 720P 时画幅会自动收窄为这两项。
+- **`adaptive` 画幅**：只在图生视频（给了首帧）时有意义，纯文本调会被拒 `t2va(纯文本)场景必须显式指定 ratio 且不能为 adaptive`，所以面板不列它。
+
+#### 修复
+
+- **任务失败时会说出上游的原因**：视频任务查询的响应里有 `task.error.{code,message}`，此前插件不读它，失败时只能显示笼统的「生成失败」。现在原因被透出并原样展示 —— 包括上面那条 2068 的套餐话术。注意那里的 `code` 是**字符串** `"2068"` 而不是数字，插件按数字归一后再分类。
+- **套餐门槛归到了正确的失败类型**：`402` 同时被「额度用尽」与「套餐额度不够」使用，此前按 `error.type`（叫 `insufficient_balance_error`）判会一律说成余额不足。现在先看上游的措辞 —— 说到套餐/升级就归「套餐」，说到余额/超出才归「额度」，都不是才按 402 归「套餐」。
+
+#### 刻意没做
+
+- **没有按套餐隐藏 H3**。插件读不到「这个账号能用哪些模型」的清单，硬写 `Go` 就不能用 H3 会在用户升级后变成新的错误。两个模型都列出来，让上游自己回答 —— 它拒绝时会把原因说清楚（现在也真的显示得出来）。
+- **没有把 `2K` 给 H3-Max**。错误文案列出的合法集合里没有它，也没有实测跑通过，宁可少给一个选项，也不给一个可能必然失败的。
+- **没有吞掉 `adaptive` 的语义**。它只对图生视频成立，而面板目前只做纯文本生成，所以不列；等首帧入口做出来再放它进去。
 
 ### 0.7.2（2026-11-20）
 
@@ -784,11 +806,10 @@ dsh plugin --profile desktop add dsh-qoder-connect
 ## 贡献者
 
 - **[eghrhegpe](https://github.com/eghrhegpe)** —— 提出了插件页图标与中英文文案的建议（[#1](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/issues/1)）。这条建议促成了 0.5.2：插件页有了自己的 SVG 图标，标题与简介有了中英两版，界面文案也开始跟随宿主语言。
-- **[azsora](https://github.com/azsora)** —— 从桌面 App 的实际调用里找出了套餐的**限额窗口接口**，并把 5 小时与每周两个窗口的用量接进了积分胶囊与插件页卡片（[#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)）：窗口时长从响应自身的起止字段推导，不写死。该功能成为 0.5.5。
 - **[qzz19970504](https://github.com/qzz19970504)** —— 定位并修复了「发图必然失败」的接线缺口（[#3](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/3)）：模型目录声明了 `image` 模态，但适配器没有把宿主的持久化附件服务接上，导致带图请求被 pi-ai 在发出前拒掉。该修复成为 0.5.3。
-- **[azsora](https://github.com/azsora)** —— 找出官方额度接口改名并反转语义（「已用百分比」→「剩余百分比」）这件事，补上了「200 但形状读不懂时也要回落旧路径」的缺口，并把积分胶囊与插件页卡片重排为圆角分栏、让「为什么没有窗口」逐项有说法（[#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)）。该合并成为 0.6.7。
 - **[lulunick](https://github.com/lulunick)** —— 找到了「生成图片**必然**失败」的真正原因：插件把 `session.prompt` 从会话对象上摘下来后以独立函数调用，`this` 因此指向了包装对象而不是会话，宿主自己的 `Session.prompt` 正是通过 `this.remote` 走到网关的，于是抛 `undefined is not an object`。方法被绑回会话后图片才真正发得出去；顺带补上了宿主要求的 `beginSubmission()` 本地回执（此前插件自己编 `requestId`，模型收到了图片但对话里不显示），以及被拒绝时（返回 `{ ok: false }` 而非抛异常）的如实提示。他同时把测试里的 mock 改成像宿主一样读 `this.remote`，让这三点钉得住（[#7](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/7)）。该修复成为 0.6.8。
-- **[azsora](https://github.com/azsora)** —— 把套餐档位移进 Plan 框当标题行，字号与余额框的大数字一致，Plan 框改名为「Plan」，网格也不再留洞（[#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)）。该重排成为 0.6.8。
+- **[azsora](https://github.com/azsora)** —— 一个人带来了三处改动（[#4](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/4)、[#5](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/5)、[#6](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/6)）：先从桌面 App 的实际调用里找出套餐的**限额窗口接口**，把 5 小时与每周两个窗口接进积分胶囊与插件页卡片，窗口时长从响应自身的起止字段推导而非写死（0.5.5）；随后发现官方额度接口改名并把语义反转（「已用百分比」→「剩余百分比」），补上「200 但形状读不懂时也要回落旧路径」的缺口，再把积分胶囊与插件页卡片重排为圆角分栏、让「为什么没有窗口」逐项有说法（0.6.7）；最后把套餐档位移进 Plan 框当标题行，字号与余额框的大数字一致，并让网格不再留洞（0.6.8）。
+- **[raj601822-debug](https://github.com/raj601822-debug)** —— 让 H3 的生图模型真正出现在宿主的模型选择器里（[#8](https://github.com/JeffTsuiCUG/dsh-connect-minimaxcode/pull/8)）：他用一个只走生图分支的 `LlmAdapter` 把 `MiniMax-H3-Image` 与 `MiniMax-H3-Image-Highspeed` 桥接成可选模型，让「聊到一半切模型出图」成为可能；提示词只取 `source.kind === 'user'` 的消息并剥掉宿主注入块，同时对 `purpose: 'session-title' | 'compaction'` 的调用直接返回而不去打上游，避免改名与压缩白扣生成次数。声明 1,000,000 的上下文窗口看起来离谱，其实是被 `compaction-basic` 逼的：它的触发阈值是 `min(W × 0.8, W − O − 65536)`，小窗口会算出负数、让宿主一开局就要压缩。此外加了输入框里的画幅与清晰度胶囊（`--ar 16:9`、`--1k|--2k|--4k`、`--n 2` 这类内联指令也认），设置存在 `~/.dsh/.minimaxcode-state.json`。该功能成为 0.8.0。
 - 插件作者：**[JeffTsuiCUG](https://github.com/JeffTsuiCUG)**
 
 ## 致谢

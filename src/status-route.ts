@@ -223,12 +223,22 @@ export interface GenerationOptions {
   imageAspectRatios: string[]
   /** The output areas an image can be made at. */
   imageAreas: string[]
+  /** The video models that can be asked for. */
+  videoModels: string[]
   /** The lengths a video can be, in seconds. */
   videoDurations: number[]
   /** The output resolutions a video can be made at. */
   videoResolutions: string[]
   /** The aspect ratios a video can be made in. */
   videoRatios: string[]
+  /**
+   * What each video model accepts, keyed by model id.
+   *
+   * The models do not accept the same choices, and the plan decides which
+   * models an account may use at all; the card needs the per-model table so
+   * a selection it offers is one the endpoint will take.
+   */
+  videoModelOptions?: Record<string, { durations: number[]; resolutions: string[]; ratios: string[] }>
 }
 
 /** What the card renders. */

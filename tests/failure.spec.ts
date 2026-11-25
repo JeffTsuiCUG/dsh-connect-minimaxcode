@@ -62,6 +62,28 @@ describe('classifying a failure', () => {
     expect(classifyFailure('nope', 429)).toBe('rate-limited')
     expect(classifyFailure('nope', 400)).toBe('parameters')
   })
+
+  it('calls a plan that does not reach a model a subscription problem', () => {
+    // Measured 2026-11-25: a `Go` account asking for the video model
+    // `MiniMax-H3` is answered HTTP 402 with
+    // 当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。 (2068)
+    // The body calls itself `insufficient_balance_error`, so a rule keyed on
+    // "insufficient" would send the reader looking for credit they have.
+    expect(classifyFailure('当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。 (2068)', 402)).toBe('subscription')
+    expect(classifyFailure('当前 Token Plan 套餐等级不支持该模型，请升级套餐后使用。 (2068)')).toBe('subscription')
+    // The same words arriving as 400 must not become "change your parameters".
+    expect(classifyFailure('当前 Token Plan 套餐等级不支持该模型', 400)).toBe('subscription')
+  })
+
+  it('keeps a spent allowance and a plan limit apart, though both say 402', () => {
+    // 402 covers both. The wording is what tells them apart, so a spent
+    // allowance still reaches the reader as one.
+    expect(classifyFailure('insufficient balance', 402)).toBe('quota')
+    expect(classifyFailure('余额不足', 402)).toBe('quota')
+    // A 402 with words this plugin does not recognise belongs to the plan,
+    // which is what the generation endpoint actually used it for.
+    expect(classifyFailure('payment required', 402)).toBe('subscription')
+  })
 })
 
 describe('what a failure costs', () => {
